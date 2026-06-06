@@ -1,0 +1,43 @@
+# Local development stack: Postgres + Metabase.
+# In production these become managed services (see README).
+#
+#   docker compose up -d
+#   # load schema once it's healthy:
+#   psql "$DATABASE_URL" -f db/schema.sql -f db/views.sql -f db/seed_categories.sql
+#   # Metabase UI: http://localhost:3000
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: lightspeed
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  metabase:
+    image: metabase/metabase:latest
+    ports:
+      - "3000:3000"
+    # Local dev: Metabase keeps its own app data in the built-in H2 store
+    # (persisted in the named volume). In production point MB_DB_* at a managed
+    # Postgres instead -- see README.
+    environment:
+      MB_DB_FILE: /metabase-data/metabase.db
+    volumes:
+      - mbdata:/metabase-data
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  mbdata:
