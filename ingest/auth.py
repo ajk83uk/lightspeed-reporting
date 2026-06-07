@@ -61,6 +61,18 @@ class TokenManager:
         conn = db.connect()
         try:
             refresh_token = self._current_refresh_token(conn)
+            # --- TEMP DIAGNOSTIC (safe: hashes + lengths only, no secrets) ----
+            import hashlib as _hl
+            _fp = lambda s: _hl.sha256((s or "").encode()).hexdigest()[:12]
+            log.info(
+                "AUTH-DIAG url=%s cid_len=%d cid_fp=%s sec_len=%d sec_fp=%s "
+                "tok_len=%d tok_fp=%s",
+                settings.token_url,
+                len(settings.client_id), _fp(settings.client_id),
+                len(settings.client_secret), _fp(settings.client_secret),
+                len(refresh_token), _fp(refresh_token),
+            )
+            # ------------------------------------------------------------------
             resp = requests.post(
                 settings.token_url,
                 headers={
@@ -73,6 +85,8 @@ class TokenManager:
                 },
                 timeout=settings.http_timeout,
             )
+            if resp.status_code >= 400:  # TEMP DIAGNOSTIC: show Keycloak's reason
+                log.error("AUTH-DIAG fail %s body=%s", resp.status_code, resp.text[:400])
             resp.raise_for_status()
             payload = resp.json()
 
