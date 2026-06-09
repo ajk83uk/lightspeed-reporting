@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Any, Iterator
 
@@ -109,7 +110,26 @@ class LightspeedClient:
                 params["to"] = to
             if next_token:
                 params["nextPageToken"] = next_token
-            data = self._get(path, params)
+            try:
+                data = self._get(path, params)
+            except requests.HTTPError as exc:
+                resp = getattr(exc, "response", None)
+                # A brand-new location 400s if `from` predates when it became
+                # operational. Lightspeed tells us the earliest valid date in the
+                # error body ("...after: 2026-04-27T16:18:38+01:00...") — retry
+                # once from there so newly-activated sites backfill cleanly.
+                if first and resp is not None and resp.status_code == 400:
+                    m = re.search(r"after:\s*([0-9T:.+\-]+)", resp.text or "")
+                    if m:
+                        frm = m.group(1)
+                        params["from"] = frm
+                        log.warning("sales[%s] 'from' too early; retrying from "
+                                    "earliest available %s", blid, frm)
+                        data = self._get(path, params)
+                    else:
+                        raise
+                else:
+                    raise
             sales = data.get("sales", []) if isinstance(data, dict) else []
             if first:
                 if not sales and isinstance(data, dict):
