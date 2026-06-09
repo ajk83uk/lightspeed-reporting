@@ -29,6 +29,7 @@ log = logging.getLogger("daily")
 STEPS = [
     ("items",   lambda: run_mod.main(["items"])),
     ("sales",   lambda: run_mod.main(["sales"])),
+    ("shifts",  lambda: run_mod.main(["shifts"])),
     ("cashoff", lambda: cashoff_mod.main([])),
 ]
 

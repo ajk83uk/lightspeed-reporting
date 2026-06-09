@@ -117,9 +117,25 @@ def ingest_sales(conn, client: LightspeedClient, blids: list[int], full: bool,
             continue
 
 
+def ingest_shifts(conn, client: LightspeedClient, blids: list[int]) -> None:
+    """Pull staff clock-in/out shifts (Staff API) for the last N days, per site."""
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    start = (now - timedelta(days=settings.shifts_days)).isoformat()
+    end = now.isoformat()
+    for blid in blids:
+        try:
+            batch = list(client.iter_shifts(blid, start, end))
+            n = db.upsert_shifts(conn, blid, batch)
+            conn.commit()
+            log.info("[%s] shifts upserted: %d", blid, n)
+        except Exception as exc:  # one site failing must not abort the others
+            conn.rollback()
+            log.error("[%s] shifts ingest FAILED, skipping: %s", blid, exc)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Lightspeed ingestion")
-    parser.add_argument("mode", choices=["items", "sales", "all", "businesses"])
+    parser.add_argument("mode", choices=["items", "sales", "shifts", "all", "businesses"])
     parser.add_argument("--full", action="store_true", help="full backfill for sales")
     parser.add_argument("--days", type=int, default=None,
                         help="sales: pull this many days back (overrides default window)")
@@ -139,6 +155,8 @@ def main(argv: list[str] | None = None) -> int:
             ingest_items(conn, client, blids)
         if args.mode in ("sales", "all"):
             ingest_sales(conn, client, blids, full=args.full, days=args.days)
+        if args.mode == "shifts":
+            ingest_shifts(conn, client, blids)
     finally:
         conn.close()
     return 0

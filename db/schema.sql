@@ -193,4 +193,22 @@ CREATE TABLE IF NOT EXISTS oauth_token (
     CONSTRAINT oauth_token_singleton CHECK (id = 1)
 );
 
+-- ---------------------------------------------------------------------------
+-- Staff shifts (Staff API: clock-in/out). One row per shift; clock_in/clock_out
+-- are derived from the shift's events[] (CLOCK_IN / CLOCK_OUT). staff_id maps to
+-- sales.ownerId / sales_lines.staffId (-> server name). Powers per-hour metrics.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS staff_shifts (
+    business_location_id  BIGINT NOT NULL,
+    shift_uuid            TEXT   NOT NULL,
+    staff_id              BIGINT,
+    clock_in              TIMESTAMPTZ,
+    clock_out             TIMESTAMPTZ,
+    date_in_utc           TIMESTAMPTZ,
+    raw                   JSONB,
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (business_location_id, shift_uuid)
+);
+CREATE INDEX IF NOT EXISTS idx_shifts_staff ON staff_shifts (staff_id);
+
 COMMIT;

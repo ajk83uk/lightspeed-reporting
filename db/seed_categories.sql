@@ -79,6 +79,25 @@ INSERT INTO category_rules (dimension, category, match_type, match_value, priori
 -- (Dropped a bare '%241%' rule: it false-matched volumes like "Coke 241ml".
 --  If your 2-4-1 items use a plain "241", add them by exact SKU instead.)
 
+-- LOADED CHIPS. The base "Loaded Chips" item rings at £0; the price (~£10.95)
+-- sits on a dot-prefixed protein MODIFIER line. Those modifiers are used
+-- exclusively for Loaded Chips (verified 100% co-occurrence), so tagging them
+-- attributes the real revenue. Leading '.' is essential -- it distinguishes the
+-- modifier from the standalone curry (e.g. '.Butter Chicken' vs 'Butter Chicken').
+-- '.Lamb Mince' is the "Lamb Keema" option. New sites reuse these names (with
+-- different SKUs), so name patterns are more future-proof than SKUs here.
+INSERT INTO category_rules (dimension, category, match_type, match_value, priority) VALUES
+    ('item_category', 'loaded chips', 'name_like', '.butter chicken%', 30),
+    ('item_category', 'loaded chips', 'name_like', '.lamb curry%',     30),
+    ('item_category', 'loaded chips', 'name_like', '.lamb mince%',      30),
+    ('item_category', 'loaded chips', 'name_like', '.paneer makhani%',  30);
+
+-- MONTHLY SPECIALS. Loaded Chips (above) and Croquettes are the current monthly
+-- specials; tracked by units sold per site. Croquettes is a normal priced item
+-- ("Lamb Croquette"). Update these when the monthly special changes.
+INSERT INTO category_rules (dimension, category, match_type, match_value, priority) VALUES
+    ('item_category', 'croquettes', 'name_like', '%croquet%', 30);
+
 COMMIT;
 
 -- NOTE: the name patterns above are a STARTING POINT. Run db/discover_items.sql

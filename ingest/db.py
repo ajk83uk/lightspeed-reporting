@@ -126,6 +126,21 @@ def _map_payment(blid: int, acct: str, p: dict) -> tuple:
     )
 
 
+def _map_shift(blid: int, s: dict) -> tuple:
+    ev = s.get("events") or []
+    ins = [e.get("timestamp") for e in ev if e.get("eventType") == "CLOCK_IN" and e.get("timestamp")]
+    outs = [e.get("timestamp") for e in ev if e.get("eventType") == "CLOCK_OUT" and e.get("timestamp")]
+    return (
+        blid,
+        s.get("uuid"),
+        s.get("staffId"),
+        _dt(min(ins)) if ins else None,    # ISO 'Z' strings sort chronologically
+        _dt(max(outs)) if outs else None,
+        _dt(s.get("dateInUTC")),
+        _j(s),
+    )
+
+
 # --- upserts ----------------------------------------------------------------
 _ITEM_SQL = """
 INSERT INTO items (business_location_id,item_id,sku,name,docket_name,
@@ -181,6 +196,25 @@ ON CONFLICT (business_location_id,account_reference,payment_uuid) DO UPDATE SET
     tip=EXCLUDED.tip, surcharge=EXCLUDED.surcharge, type=EXCLUDED.type,
     raw=EXCLUDED.raw, updated_at=now();
 """
+
+
+_SHIFT_SQL = """
+INSERT INTO staff_shifts (business_location_id,shift_uuid,staff_id,clock_in,
+    clock_out,date_in_utc,raw,updated_at)
+VALUES (%s,%s,%s,%s,%s,%s,%s,now())
+ON CONFLICT (business_location_id,shift_uuid) DO UPDATE SET
+    staff_id=EXCLUDED.staff_id, clock_in=EXCLUDED.clock_in,
+    clock_out=EXCLUDED.clock_out, date_in_utc=EXCLUDED.date_in_utc,
+    raw=EXCLUDED.raw, updated_at=now();
+"""
+
+
+def upsert_shifts(conn, blid: int, shifts: list[dict]) -> int:
+    rows = [_map_shift(blid, s) for s in shifts if s.get("uuid")]
+    if rows:
+        with conn.cursor() as cur:
+            psycopg2.extras.execute_batch(cur, _SHIFT_SQL, rows, page_size=500)
+    return len(rows)
 
 
 def upsert_site(conn, blid: int, business_name: str | None, nickname: str | None) -> None:

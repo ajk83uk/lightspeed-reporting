@@ -44,7 +44,7 @@ class Settings:
     client_id: str = os.getenv("LS_CLIENT_ID", "")
     client_secret: str = os.getenv("LS_CLIENT_SECRET", "")
     # offline_access extends refresh-token lifetime (recommended).
-    scopes: str = os.getenv("LS_SCOPES", "financial-api items offline_access")
+    scopes: str = os.getenv("LS_SCOPES", "financial-api items staff-api offline_access")
     # Initial seed only. The live (rotating) refresh token is persisted in the
     # oauth_token table after the first refresh -- see auth.py.
     refresh_token: str = os.getenv("LS_REFRESH_TOKEN", "")
@@ -57,6 +57,10 @@ class Settings:
         "LS_PATH_SALES", "/f/v2/business-location/{blid}/sales"
     )
     path_items: str = os.getenv("LS_PATH_ITEMS", "/items/v1/items")
+    # Staff API (needs staff-api scope + ROLE_CONFIG_USERS). Clock-in/out shifts.
+    path_shifts: str = os.getenv("LS_PATH_SHIFTS", "/staff/v1/businessLocations/{blid}/shift")
+    # How many days of shifts to (re)pull each run. Idempotent upsert.
+    shifts_days: int = int(os.getenv("LS_SHIFTS_DAYS", "30"))
 
     # Pagination caps documented for each endpoint.
     sales_page_size: int = int(os.getenv("LS_SALES_PAGE_SIZE", "100"))   # V2 max 100

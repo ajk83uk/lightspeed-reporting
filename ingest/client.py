@@ -142,6 +142,32 @@ class LightspeedClient:
             if not next_token:
                 break
 
+    # --- Shifts (Staff API) ------------------------------------------------
+    def iter_shifts(self, blid: int, start: str, end: str) -> Iterator[dict]:
+        """Yield shift objects for a location over [start, end].
+
+        start/end are ISO-8601 WITH offset (e.g. 2026-06-09T22:00:00+00:00) --
+        the endpoint rejects bare timestamps. Response shape:
+        {"data": {"shifts": [{uuid, staffId, dateInUTC, events:[{eventType,
+        timestamp}]}]}, "links", "page"}. Page/size pagination.
+        """
+        path = settings.path_shifts.format(blid=blid)
+        page, size, first = 0, 200, True
+        while True:
+            params = {"startTime": start, "endTime": end, "page": page, "size": size}
+            data = self._get(path, params)
+            shifts = ((data.get("data") or {}).get("shifts")) if isinstance(data, dict) else None
+            if first:
+                log.info("shifts[%s] first page: %d", blid, len(shifts or []))
+                first = False
+            if not shifts:
+                break
+            for s in shifts:
+                yield s
+            if len(shifts) < size:
+                break
+            page += 1
+
     @staticmethod
     def _extract_item_list(data: Any) -> list[dict]:
         """Pull the list of items out of whatever shape the endpoint returns."""
