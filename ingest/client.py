@@ -45,6 +45,13 @@ class LightspeedClient:
                 log.warning("HTTP %s on %s; retry in %ss", resp.status_code, path, wait)
                 time.sleep(wait)
                 continue
+            if resp.status_code >= 400:
+                # Surface the API's reason (e.g. why a location 400s) instead of
+                # the bare HTTPError. Logs the request window + response body.
+                _p = params or {}
+                log.error("HTTP %s on %s from=%s to=%s body=%s",
+                          resp.status_code, path, _p.get("from"), _p.get("to"),
+                          resp.text[:500])
             resp.raise_for_status()
             return resp.json()
         resp.raise_for_status()  # exhausted retries
