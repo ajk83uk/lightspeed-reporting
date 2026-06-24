@@ -5,6 +5,8 @@
     "dockerfilePath": "Dockerfile"
   },
   "deploy": {
+    "startCommand": "python -m ingest.daily",
+    "cronSchedule": "30 5 * * *",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3
   }

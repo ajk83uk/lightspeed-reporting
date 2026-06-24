@@ -68,4 +68,43 @@ LEFT JOIN v_staff_names nm ON nm.staff_id = ss.staff_id
 WHERE ss.clock_in IS NOT NULL
 GROUP BY 1,2,3,4,5;
 
+-- Per site/server/day metrics that power the monthly "rank of ranks" staff
+-- league table (Metabase card 206). One row per (site, server, day) with every
+-- rankable metric: sales/tips/covers/desserts/specials from v_staff_day, plus
+-- poppadom + 2-4-1 counts (from report lines), table turn time (dwell = closed -
+-- opening), and clocked hours. The league card ranks each server 1..N within
+-- their site on each category and sums the positions (lowest = best); "Reviews"
+-- from the legacy PDF report is intentionally omitted (no source in Lightspeed).
+CREATE OR REPLACE VIEW v_staff_scorecard_day AS
+WITH cat AS (
+  SELECT rl.business_location_id, rl.site, s.owner_name AS staff, rl.business_date,
+    SUM(rl.quantity) FILTER (WHERE rl.item_category='poppadoms')     AS poppadom_qty,
+    SUM(rl.quantity) FILTER (WHERE rl.item_category='241 cocktails') AS c241_qty
+  FROM v_report_lines rl
+  JOIN sales s ON s.business_location_id=rl.business_location_id AND s.account_reference=rl.account_reference
+  WHERE COALESCE(s.cancelled,false)=false AND COALESCE(s.owner_name,'') NOT IN ('Order Anywhere','Head Office')
+  GROUP BY 1,2,3,4
+),
+turn AS (
+  SELECT s.business_location_id, st.nickname AS site, s.owner_name AS staff,
+    (s.time_closed AT TIME ZONE 'Europe/London')::date AS business_date,
+    SUM(EXTRACT(epoch FROM (s.time_closed - s.time_opening))/60.0) AS dwell_min,
+    COUNT(*) AS turn_receipts
+  FROM sales s JOIN sites st ON st.business_location_id=s.business_location_id
+  WHERE COALESCE(s.cancelled,false)=false AND s.time_opening IS NOT NULL AND s.time_closed IS NOT NULL
+    AND COALESCE(s.owner_name,'') NOT IN ('Order Anywhere','Head Office')
+  GROUP BY 1,2,3,4
+)
+SELECT d.business_location_id, d.site, d.staff, d.business_date,
+  d.covers, d.receipts, d.tips, d.sales_exvat, d.dessert_qty, d.special_qty,
+  COALESCE(c.poppadom_qty,0)  AS poppadom_qty,
+  COALESCE(c.c241_qty,0)      AS c241_qty,
+  COALESCE(t.dwell_min,0)     AS dwell_min,
+  COALESCE(t.turn_receipts,0) AS turn_receipts,
+  COALESCE(h.hours,0)         AS hours
+FROM v_staff_day d
+LEFT JOIN cat  c ON c.business_location_id=d.business_location_id AND c.staff=d.staff AND c.business_date=d.business_date
+LEFT JOIN turn t ON t.business_location_id=d.business_location_id AND t.staff=d.staff AND t.business_date=d.business_date
+LEFT JOIN v_staff_hours_day h ON h.business_location_id=d.business_location_id AND h.staff=d.staff AND h.business_date=d.business_date;
+
 COMMIT;

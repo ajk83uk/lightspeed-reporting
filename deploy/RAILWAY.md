@@ -79,11 +79,15 @@ Notes:
 
 ## 4. Set the start command + nightly schedule
 
-Service -> **Settings** -> **Deploy**:
+These are now pinned in `railway.json` (config-as-code), so a deploy sets them
+and they're version-controlled. They can still be overridden in
+Service -> **Settings** -> **Deploy**, but the repo is the source of truth:
 
 - **Start Command:** `python -m ingest.daily`
-- **Cron Schedule:** `0 3 * * *`  (03:00 UTC every day -- after the cash-off
-  sheets are filled in for the night. Adjust the hour if you prefer.)
+- **Cron Schedule:** `30 5 * * *`  (05:30 UTC every day). Moved from `0 3 * * *`
+  on 2026-06-24: Nory's S3 labour export only lands at ~04:21 UTC, so a 03:00 run
+  always missed the freshest day and "last night" labour was a day behind. 05:30
+  is after both the cash-off sheets and the Nory export.
 
 Railway cron notes: a run is skipped if the previous one is still going, and our
 upserts are idempotent, so retries/overlaps are safe.

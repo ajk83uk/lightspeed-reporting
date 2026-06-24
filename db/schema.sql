@@ -211,4 +211,82 @@ CREATE TABLE IF NOT EXISTS staff_shifts (
 );
 CREATE INDEX IF NOT EXISTS idx_shifts_staff ON staff_shifts (staff_id);
 
+-- ---------------------------------------------------------------------------
+-- Sentiment Search (review/reputation feed). Two file types per the vendor:
+--   * review-level rows  -> sentiment_reviews
+--   * monthly/daily site metrics -> sentiment_overview
+-- Loaded by ingest/sentiment.py. The files identify sites by full label
+-- ('Tap and Tandoor X'); sentiment_site_map bridges that to the warehouse
+-- (business_location_id + the short nickname cashoff_daily.site uses), so
+-- reviews/ratings join to sales, items and cash-off.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS sentiment_site_map (
+    sentiment_label      TEXT PRIMARY KEY,    -- 'Tap and Tandoor Solihull' as in the files
+    business_location_id BIGINT,              -- FK-ish to sites(); NULL until a site exists
+    nickname             TEXT                 -- short name, matches cashoff_daily.site
+);
+
+-- Seed the five Tap & Tandoor sites (idempotent). business_location_ids match
+-- the sites table; nickname matches cashoff_daily.site so the sources line up.
+INSERT INTO sentiment_site_map (sentiment_label, business_location_id, nickname) VALUES
+    ('Tap and Tandoor Bournemouth',  1718940401139714, 'Bournemouth'),
+    ('Tap and Tandoor Peterborough', 1718940401139719, 'Peterborough'),
+    ('Tap and Tandoor Portsmouth',   1718940401139718, 'Portsmouth'),
+    ('Tap and Tandoor Solihull',     1718940401139720, 'Solihull'),
+    ('Tap and Tandoor Southampton',  1718940401139717, 'Southampton')
+ON CONFLICT (sentiment_label) DO NOTHING;
+
+-- Review-level rows. No vendor review ID yet, so the PK is a content hash:
+-- sha256(business|source|date|user|text). Switch to the real ID when Prithvi
+-- ships it (a stable ID would also let edited reviews update in place).
+CREATE TABLE IF NOT EXISTS sentiment_reviews (
+    review_hash      TEXT PRIMARY KEY,
+    sentiment_label  TEXT NOT NULL,
+    source           TEXT,                    -- Google / Typeform / Trip Advisor / Facebook
+    review_date      DATE NOT NULL,
+    rating           NUMERIC(3,1),
+    review_text      TEXT,
+    reviewer         TEXT,
+    source_file      TEXT,
+    loaded_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_sr_site_date ON sentiment_reviews (sentiment_label, review_date);
+CREATE INDEX IF NOT EXISTS idx_sr_source    ON sentiment_reviews (source);
+
+-- Aggregated site metrics. Historical grain is monthly (the file = the month);
+-- the future daily feed will land grain='day'. raw keeps the *Comparison delta
+-- columns and anything not promoted to a typed column.
+CREATE TABLE IF NOT EXISTS sentiment_overview (
+    sentiment_label       TEXT NOT NULL,
+    period_start          DATE NOT NULL,       -- 1st of month (historical) or the day (daily)
+    grain                 TEXT NOT NULL,       -- 'month' | 'day'
+    reviews               INTEGER,
+    rating                NUMERIC(3,2),
+    competitor_rating     NUMERIC(3,2),
+    star5 INTEGER, star4 INTEGER, star3 INTEGER, star2 INTEGER, star1 INTEGER,
+    nps                   NUMERIC(6,2),
+    critical              INTEGER,
+    food_sentiment        NUMERIC(4,1), food_mentions        INTEGER,
+    service_sentiment     NUMERIC(4,1), service_mentions     INTEGER,
+    ambience_sentiment    NUMERIC(4,1), ambience_mentions    INTEGER,
+    cleanliness_sentiment NUMERIC(4,1), cleanliness_mentions INTEGER,
+    drinks_sentiment      NUMERIC(4,1), drinks_mentions      INTEGER,
+    cost_sentiment        NUMERIC(4,1), cost_mentions        INTEGER,
+    raw                   JSONB,
+    source_file           TEXT,
+    loaded_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (sentiment_label, period_start, grain)
+);
+
+-- Per-file ingest log: lets the loader skip a file it has already processed
+-- (matched by name + content hash), so re-running is safe.
+CREATE TABLE IF NOT EXISTS sentiment_files (
+    filename   TEXT NOT NULL,
+    sha256     TEXT NOT NULL,
+    kind       TEXT,                            -- 'reviews' | 'overview'
+    row_count  INTEGER,
+    loaded_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (filename, sha256)
+);
+
 COMMIT;

@@ -98,6 +98,15 @@ INSERT INTO category_rules (dimension, category, match_type, match_value, priori
 INSERT INTO category_rules (dimension, category, match_type, match_value, priority) VALUES
     ('item_category', 'croquettes', 'name_like', '%croquet%', 30);
 
+-- LUNCH MENU. The lunch menu is two bowl options — "Curry Bowl" and "Salad Bowl"
+-- — each a normal priced base item with the choice (curry/salad) sitting on a
+-- modifier line. Counting the base bowl lines = number of lunch covers sold.
+-- (In Lightspeed it's a sub-menu; the Items API doesn't expose menu/sub-menu
+-- membership, so we match on the bowl names instead.)
+INSERT INTO category_rules (dimension, category, match_type, match_value, priority) VALUES
+    ('item_category', 'lunch menu', 'name_like', '%curry bowl%', 30),
+    ('item_category', 'lunch menu', 'name_like', '%salad bowl%', 30);
+
 COMMIT;
 
 -- NOTE: the name patterns above are a STARTING POINT. Run db/discover_items.sql
