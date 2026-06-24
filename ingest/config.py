@@ -82,6 +82,62 @@ class Settings:
         "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/lightspeed"
     )
 
+    # --- Sentiment Search feed --------------------------------------------
+    # The reviews/overview CSVs can arrive three ways; each is independent and
+    # off by default, so the nightly job no-ops cleanly until one is configured.
+    #
+    # 1) Local folder (a synced mount, or a manual drop for backfills).
+    sentiment_src: str = os.getenv("SENTIMENT_SRC", "")
+    #
+    # 2) EMAIL route -- pull the daily CSV attachments straight from the inbox.
+    #    Gmail API with OAuth *user* credentials (personal googlemail account, so
+    #    a service account won't do). Mint the refresh token once with
+    #    `python -m ingest.get_gmail_token`. Route is OFF unless all three of
+    #    client id / secret / refresh token are set.
+    gmail_client_id: str = os.getenv("GMAIL_CLIENT_ID", "")
+    gmail_client_secret: str = os.getenv("GMAIL_CLIENT_SECRET", "")
+    gmail_refresh_token: str = os.getenv("GMAIL_REFRESH_TOKEN", "")
+    gmail_token_url: str = os.getenv("GMAIL_TOKEN_URL", "https://oauth2.googleapis.com/token")
+    # Who the feed comes from, and how far back to scan each run.
+    sentiment_email_from: str = os.getenv("SENTIMENT_EMAIL_FROM", "contact@sentimentsearch.com")
+    sentiment_email_subject: str = os.getenv("SENTIMENT_EMAIL_SUBJECT", "")
+    # Optional raw Gmail query override; when set it wins over from/subject.
+    sentiment_email_query: str = os.getenv("SENTIMENT_EMAIL_QUERY", "")
+    sentiment_email_lookback_days: int = int(os.getenv("SENTIMENT_EMAIL_LOOKBACK_DAYS", "3"))
+    # Optional Gmail label applied to messages after a successful load, and
+    # excluded from the next search so we don't re-download. Empty = don't label
+    # (idempotency still holds via the sentiment_files hash log).
+    sentiment_email_label: str = os.getenv("SENTIMENT_EMAIL_LABEL", "")
+    #
+    # 3) GCS route -- Prithvi pushes objects to a bucket prefix on our side.
+    #    Read with the same service-account key style as cash-off. Route is OFF
+    #    unless the bucket is set.
+    sentiment_gcs_bucket: str = os.getenv("SENTIMENT_GCS_BUCKET", "")
+    sentiment_gcs_prefix: str = os.getenv("SENTIMENT_GCS_PREFIX", "")
+    sentiment_gcs_key_path: str = os.getenv(
+        "SENTIMENT_GCS_KEY_PATH",
+        os.getenv("GCP_KEY_PATH", os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "gcp-cashoff-key.json")),
+    )
+
+    # --- Favourite Table bookings (pull API: GetBookingList) ---------------
+    # Production host (same path as demo). Token goes in the URL path, not a
+    # header. Step skips cleanly until FT_AUTH_TOKEN is set (see bookings.py).
+    ft_base: str = os.getenv("FT_BASE", "https://api.favouritetable.com")
+    ft_auth_token: str = os.getenv("FT_AUTH_TOKEN", "")
+    # The 5 T&T sites; Bournemouth = 2082 (main) + 2102 (Darts & Shuffleboard),
+    # both fold into Bournemouth in reporting.
+    ft_site_codes: tuple = tuple(
+        int(x) for x in os.getenv(
+            "FT_SITE_CODES", "2084,2082,2102,2083,2086,2085"
+        ).replace(" ", "").split(",") if x
+    )
+    # Nightly rolling re-pull window (days) so late status changes self-heal.
+    ft_window_days: int = int(os.getenv("FT_WINDOW_DAYS", "14"))
+    # Gap between calls; FT throttles at the global level if load spikes.
+    ft_throttle_secs: float = float(os.getenv("FT_THROTTLE_SECS", "0.4"))
+
     # --- Ingestion behaviour ----------------------------------------------
     # How many days back a "full" backfill goes when there's no watermark.
     backfill_days: int = int(os.getenv("LS_BACKFILL_DAYS", "365"))

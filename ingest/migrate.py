@@ -40,7 +40,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="skip seed_categories.sql (preserve edited rules)")
     args = parser.parse_args(argv)
 
-    files = ["schema.sql", "views.sql"]
+    files = ["schema.sql", "bookings_schema.sql", "views.sql", "views_sentiment.sql",
+             "views_bookings.sql"]
     if not args.no_seed:
         files.append("seed_categories.sql")
 
