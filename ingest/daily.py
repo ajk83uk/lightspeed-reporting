@@ -25,6 +25,7 @@ from . import cashoff as cashoff_mod
 from . import sentiment as sentiment_mod
 from . import sentiment_email as sentiment_email_mod
 from . import sentiment_gcs as sentiment_gcs_mod
+from . import sentiment_s3 as sentiment_s3_mod
 from . import nory as nory_mod
 from . import bookings as bookings_mod
 
@@ -50,9 +51,11 @@ STEPS = [
     # Sentiment Search review feed. Three independent sources, each a safe no-op
     # until configured, so exactly one (or none) does work on a given night:
     #   * email -- pull daily CSV attachments from the inbox (GMAIL_* set)
-    #   * gcs   -- pull objects from the vendor bucket (SENTIMENT_GCS_BUCKET set)
+    #   * s3    -- pull objects from the R2 bucket (SENTIMENT_S3_* set) [LIVE route]
+    #   * gcs   -- legacy; vendor can't push to GCS, kept as a no-op
     #   * src   -- a local/synced landing folder (SENTIMENT_SRC set)
     ("sentiment_email", lambda: sentiment_email_mod.main([])),
+    ("sentiment_s3",    lambda: sentiment_s3_mod.main([])),
     ("sentiment_gcs",   lambda: sentiment_gcs_mod.main([])),
     ("sentiment",       lambda: sentiment_mod.main([])),
 ]

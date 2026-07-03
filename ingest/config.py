@@ -120,6 +120,19 @@ class Settings:
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "gcp-cashoff-key.json")),
     )
+    #
+    # 4) S3 route -- Prithvi pushes objects to an S3-compatible bucket on our
+    #    side (Cloudflare R2). This is the delivery Sentiment Search settled on.
+    #    Read with boto3 pointed at the R2 endpoint. Uses its OWN credential vars
+    #    (NOT the ambient AWS_* keys the Nory step uses -- different account), so
+    #    the two S3 feeds never share a key. Route is OFF unless the bucket,
+    #    endpoint and both credential vars are set. Region defaults to "auto" (R2).
+    sentiment_s3_bucket: str = os.getenv("SENTIMENT_S3_BUCKET", "")
+    sentiment_s3_prefix: str = os.getenv("SENTIMENT_S3_PREFIX", "")
+    sentiment_s3_endpoint: str = os.getenv("SENTIMENT_S3_ENDPOINT_URL", "")
+    sentiment_s3_region: str = os.getenv("SENTIMENT_S3_REGION", "auto")
+    sentiment_s3_access_key_id: str = os.getenv("SENTIMENT_S3_ACCESS_KEY_ID", "")
+    sentiment_s3_secret_access_key: str = os.getenv("SENTIMENT_S3_SECRET_ACCESS_KEY", "")
 
     # --- Favourite Table bookings (pull API: GetBookingList) ---------------
     # Production host (same path as demo). Token goes in the URL path, not a
@@ -137,6 +150,16 @@ class Settings:
     ft_window_days: int = int(os.getenv("FT_WINDOW_DAYS", "14"))
     # Gap between calls; FT throttles at the global level if load spikes.
     ft_throttle_secs: float = float(os.getenv("FT_THROTTLE_SECS", "0.4"))
+
+    # --- StoreKit online orders (webhook push, Svix) -----------------------
+    # The receiver (ingest/storekit_webhook.py) runs as a SEPARATE always-on
+    # Railway web service; it does NOT run in the nightly cron. Signature
+    # verification is OFF (receiver returns 401) until the secret is set, so a
+    # misconfigured deploy fails closed rather than ingesting unsigned traffic.
+    # Get the secret from the StoreKit dashboard when you register the endpoint.
+    storekit_webhook_secret: str = os.getenv("STOREKIT_WEBHOOK_SECRET", "")
+    # Set to "1" only for local testing to skip signature verification.
+    storekit_skip_verify: bool = os.getenv("STOREKIT_SKIP_VERIFY", "") == "1"
 
     # --- Ingestion behaviour ----------------------------------------------
     # How many days back a "full" backfill goes when there's no watermark.
