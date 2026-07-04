@@ -51,11 +51,13 @@ CHANNEL = {1: "Web", 2: "Phone", 5: "Walk-in", 103: "Third-party"}
 INTERFACE = {1: "Google", 2: "Zomato", 3: "FTWaiting", 4: "Swiggy",
              5: "EasyDinner", 7: "RezControl", 8: "SquareMeal"}
 
-# FT SiteCode -> reporting site label. 2102 (Bournemouth Darts & Shuffleboard)
-# folds into Bournemouth. business_location_id is resolved per code from the
-# ft_site_map table at ingest time (NULL until that map is filled).
+# FT SiteCode -> reporting site label. 2102 (Darts & Shuffleboard) is its OWN
+# reporting line, "Bournemouth (Darts)", split out of the main Bournemouth venue
+# so its (often large, group) bookings don't inflate Bournemouth's headline.
+# It shares the Bournemouth till, so its business_location_id is left NULL in
+# ft_site_map -- sales stay on the main Bournemouth line, Darts is bookings-only.
 SITE_NAMES = {
-    2084: "Solihull", 2082: "Bournemouth", 2102: "Bournemouth",
+    2084: "Solihull", 2082: "Bournemouth", 2102: "Bournemouth (Darts)",
     2083: "Peterborough", 2086: "Portsmouth", 2085: "Southampton",
 }
 
@@ -169,6 +171,7 @@ def _row(site_code: int, the_date: date, b: dict, blid) -> tuple | None:
         _first(b, "Email"), _first(b, "Tel", "Mobile", "Telephone"),
         _bool(_first(b, "SpecialOfferEmail", "OptInEmail")),
         _bool(_first(b, "SpecialOfferMobile", "OptInMobile")),
+        _first(b, "CreatedOn"),   # when the booking was made -> pre-book vs same-day
         psycopg2.extras.Json(b),
     )
 
@@ -179,7 +182,7 @@ _COLS = [
     "status_code", "status", "sale_channel_code", "sale_channel",
     "interface_type_code", "interface_type", "table_no", "is_reward_member", "visits",
     "total_amount", "deposit", "first_name", "last_name", "email", "tel",
-    "opt_in_email", "opt_in_mobile", "raw",
+    "opt_in_email", "opt_in_mobile", "created_on", "raw",
 ]
 
 _UPSERT = f"""

@@ -8,8 +8,10 @@
 
 -- Site map: FT SiteCode -> site label, and (once confirmed) the matching
 -- Lightspeed business_location_id so dashboards can join bookings to LS sales.
--- Bournemouth has TWO FT SiteCodes (2082 main venue + 2102 Darts & Shuffleboard);
--- both roll up to the one Bournemouth site. T&T only -- Zindiya out of scope.
+-- Bournemouth has TWO FT SiteCodes: 2082 (main venue) and 2102 (Darts &
+-- Shuffleboard). 2102 is reported as its OWN line "Bournemouth (Darts)" with a
+-- NULL business_location_id: it shares the Bournemouth till, so sales stay on
+-- the main Bournemouth line and Darts is bookings-only. T&T only -- Zindiya out.
 CREATE TABLE IF NOT EXISTS ft_site_map (
     ft_site_code         integer PRIMARY KEY,
     site_name            text NOT NULL,      -- the site it rolls up to in reporting
@@ -21,7 +23,7 @@ CREATE TABLE IF NOT EXISTS ft_site_map (
 INSERT INTO ft_site_map (ft_site_code, site_name, is_core) VALUES
     (2084, 'Solihull',     true),
     (2082, 'Bournemouth',  true),
-    (2102, 'Bournemouth',  true),   -- Darts & Shuffleboard -> folds into Bournemouth
+    (2102, 'Bournemouth (Darts)', true),   -- Darts & Shuffleboard: own line; blid stays NULL (shares Bournemouth till)
     (2083, 'Peterborough', true),
     (2086, 'Portsmouth',   true),
     (2085, 'Southampton',  true)
@@ -60,6 +62,7 @@ CREATE TABLE IF NOT EXISTS bookings (
     visits               integer,           -- repeat-guest count
     total_amount         numeric,
     deposit              numeric,
+    created_on           timestamptz,       -- when the booking was made (FT CreatedOn) -> pre-book vs same-day
     -- PII kept minimal.
     first_name           text,
     last_name            text,
