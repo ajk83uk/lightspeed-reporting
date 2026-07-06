@@ -139,6 +139,7 @@ CREATE TABLE IF NOT EXISTS cashoff_daily (
     cash_variance   NUMERIC(14,2),   -- actual - expected (+over / -short)
     card_tips       NUMERIC(14,2),
     cash_tips       NUMERIC(14,2),
+    service_charge  NUMERIC(14,2),   -- Zindiya form only; counts toward tips
     covers          NUMERIC(14,2),
     wage_cost       NUMERIC(14,2),   -- from RotaReady, via the form
     cashed_up_by    TEXT,
@@ -147,6 +148,8 @@ CREATE TABLE IF NOT EXISTS cashoff_daily (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (site, business_date)
 );
+-- Added later; CREATE IF NOT EXISTS won't touch existing DBs, so patch in place.
+ALTER TABLE cashoff_daily ADD COLUMN IF NOT EXISTS service_charge NUMERIC(14,2);
 
 -- ---------------------------------------------------------------------------
 -- Category rules -- how raw lines roll up into report categories.

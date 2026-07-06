@@ -4,3 +4,7 @@ python-dotenv>=1.0
 google-api-python-client>=2.0
 google-auth>=2.0
 boto3>=1.34
+# StoreKit webhook receiver (separate always-on web service)
+flask>=3.0
+gunicorn>=21.0
+svix>=1.0

@@ -146,6 +146,10 @@ class Settings:
             "FT_SITE_CODES", "2084,2082,2102,2083,2086,2085"
         ).replace(" ", "").split(",") if x
     )
+    # Extra/override SiteCode -> reporting label pairs, merged over the built-in
+    # T&T map in bookings.py. Format "code:name,code:name", e.g. "1453:Zindiya".
+    # Lets another deployment (Zindiya service) name its sites without a fork.
+    ft_site_names: str = os.getenv("FT_SITE_NAMES", "")
     # Nightly rolling re-pull window (days) so late status changes self-heal.
     ft_window_days: int = int(os.getenv("FT_WINDOW_DAYS", "14"))
     # Gap between calls; FT throttles at the global level if load spikes.

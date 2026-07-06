@@ -20,6 +20,7 @@ Env (set in Railway):
     FT_AUTH_TOKEN      production auth token (REQUIRED; step skips cleanly if unset)
     FT_BASE            default https://api.favouritetable.com
     FT_SITE_CODES      default 2084,2082,2102,2083,2086,2085  (Bournemouth = 2082 + 2102)
+    FT_SITE_NAMES      extra/override "code:name" pairs, e.g. "1453:Zindiya" (Zindiya service)
     FT_WINDOW_DAYS     default 14   (nightly rolling re-pull window)
     FT_THROTTLE_SECS   default 0.4  (gap between calls; FT throttles globally if load spikes)
     DATABASE_URL       reused from the existing config
@@ -60,6 +61,21 @@ SITE_NAMES = {
     2084: "Solihull", 2082: "Bournemouth", 2102: "Bournemouth (Darts)",
     2083: "Peterborough", 2086: "Portsmouth", 2085: "Southampton",
 }
+
+
+def _parse_site_names(env: str) -> dict[int, str]:
+    """FT_SITE_NAMES="1453:Zindiya,999:Other" -> {1453: "Zindiya", ...}."""
+    out: dict[int, str] = {}
+    for part in env.split(","):
+        code, _, name = part.strip().partition(":")
+        if code.strip().isdigit() and name.strip():
+            out[int(code.strip())] = name.strip()
+    return out
+
+
+# Env additions/overrides win, so another deployment (e.g. the Zindiya service
+# with FT_SITE_CODES=1453) can label its sites without touching this file.
+SITE_NAMES.update(_parse_site_names(settings.ft_site_names))
 
 
 # --- small parsing helpers --------------------------------------------------
@@ -194,6 +210,38 @@ ON CONFLICT (ft_site_code, booking_ref_no) DO UPDATE SET
 """
 
 
+def _ensure_site_map(conn, site_codes: list[int]) -> None:
+    """Make sure ft_site_map has a row for every configured SiteCode.
+
+    The schema seed only covers the T&T codes, so a fresh deployment (e.g. the
+    Zindiya DB, FT_SITE_CODES=1453) gets its rows created here at run time.
+    ON CONFLICT DO NOTHING preserves existing rows -- in particular the
+    deliberate NULL blid on 2102 'Bournemouth (Darts)' is never re-filled
+    because only rows created/left with a NULL blid AND a nickname match get
+    filled, and 'Bournemouth (Darts)' matches no nickname.
+    """
+    rows = [(sc, SITE_NAMES.get(sc, str(sc))) for sc in site_codes]
+    with conn.cursor() as cur:
+        psycopg2.extras.execute_batch(
+            cur,
+            "INSERT INTO ft_site_map (ft_site_code, site_name) VALUES (%s, %s) "
+            "ON CONFLICT (ft_site_code) DO NOTHING",
+            rows,
+        )
+        # Fill missing business_location_ids from the master sites dimension
+        # (sites.nickname is the POS label, matched by containment -- same rule
+        # the schema migration uses).
+        cur.execute(
+            "UPDATE ft_site_map m SET business_location_id = s.business_location_id, "
+            "updated_at = now() FROM sites s "
+            "WHERE m.business_location_id IS NULL "
+            "  AND m.ft_site_code = ANY(%s) "
+            "  AND s.nickname ILIKE '%%' || m.site_name || '%%'",
+            (list(site_codes),),
+        )
+    conn.commit()
+
+
 def _load_blid_map(conn) -> dict[int, int]:
     """ft_site_code -> business_location_id from ft_site_map (filled by migrate)."""
     with conn.cursor() as cur:
@@ -246,6 +294,8 @@ def main(argv: list[str] | None = None) -> int:
 
     session = requests.Session()
     conn = None if args.dry_run else psycopg2.connect(settings.database_url)
+    if conn:
+        _ensure_site_map(conn, site_codes)
     blid_map = _load_blid_map(conn) if conn else {}
     total = 0
     try:

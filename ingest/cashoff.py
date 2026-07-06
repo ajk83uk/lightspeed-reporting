@@ -36,13 +36,19 @@ log = logging.getLogger("cashoff")
 KEY_PATH = os.getenv("GCP_KEY_PATH", os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gcp-cashoff-key.json"))
 
-SHEETS = {
+# Per-site cash-off form spreadsheets. Defaults are the 5 T&T sheets; a
+# deployment can replace the whole map via CASHOFF_SHEETS (a JSON object,
+# e.g. '{"Zindiya": "1b--Uj2m..."}') so the same repo serves other brands
+# (the Zindiya Railway service sets its own sheet and never sees these).
+_DEFAULT_SHEETS = {
     "Solihull":     "1KfCEGeAMSqhCJAdcMm7wVhSGSxOEywpYr-L0aPuBufg",
     "Peterborough": "134v-MiukKSDmgiQDVou5HmUw9qIsQc7EvLnG5ieJyBQ",
     "Southampton":  "1FuILLwfb3HjX7aAgHKt6knqSgqcvYuYmPnPHEGKMxWQ",
     "Portsmouth":   "1KfmDYUpMoL7lxWHvCKdf6pF6sbi3MBL-5T81bo6MDng",
     "Bournemouth":  "1vlGnfjRHxv7Bctn1IBWvg9vJ38jIkfwHbI7rxEgpQ5k",
 }
+SHEETS = json.loads(os.environ["CASHOFF_SHEETS"]) if os.getenv("CASHOFF_SHEETS") \
+    else _DEFAULT_SHEETS
 
 # --- Keyword column mapping -------------------------------------------------
 # canonical field -> predicate over a lowercased header. Order matters: more
@@ -55,6 +61,7 @@ FIELD_MATCHERS = [
     ("business_date",   lambda h: h.strip() == "date"),
     ("card_tips",       _has("card", "tip")),
     ("cash_tips",       _has("cash", "tip")),
+    ("service_charge",  _has("service", "charge")),  # Zindiya form; counts toward tips
     ("uber_eats",       lambda h: "uber" in h),
     ("just_eat",        lambda h: "just eat" in h or "justeat" in h),
     ("deliveroo",       lambda h: "deliveroo" in h),
@@ -70,7 +77,7 @@ FIELD_MATCHERS = [
 ]
 NUMERIC_FIELDS = {"total_sales", "card_sales", "online_orders", "uber_eats", "just_eat",
                   "deliveroo", "petty_cash", "expected_cash", "actual_cash",
-                  "card_tips", "cash_tips", "covers"}
+                  "card_tips", "cash_tips", "service_charge", "covers"}
 TEXT_FIELDS = {"cashed_up_by", "discrepancy_note"}
 
 
@@ -165,8 +172,8 @@ def read_sheet(service, sheet_id: str) -> list[list]:
 # --- DB ---------------------------------------------------------------------
 _COLS = ["site", "business_date", "total_sales", "card_sales", "online_orders",
          "uber_eats", "just_eat", "deliveroo", "petty_cash", "expected_cash",
-         "actual_cash", "cash_variance", "card_tips", "cash_tips", "covers",
-         "wage_cost", "cashed_up_by", "discrepancy_note", "raw"]
+         "actual_cash", "cash_variance", "card_tips", "cash_tips", "service_charge",
+         "covers", "wage_cost", "cashed_up_by", "discrepancy_note", "raw"]
 
 _UPSERT = f"""
 INSERT INTO cashoff_daily ({','.join(_COLS)}, updated_at)
@@ -184,7 +191,8 @@ def upsert(conn, site: str, recs: list[dict]) -> int:
             site, r["business_date"], r.get("total_sales"), r.get("card_sales"),
             r.get("online_orders"), r.get("uber_eats"), r.get("just_eat"), r.get("deliveroo"),
             r.get("petty_cash"), r.get("expected_cash"), r.get("actual_cash"),
-            r.get("cash_variance"), r.get("card_tips"), r.get("cash_tips"), r.get("covers"),
+            r.get("cash_variance"), r.get("card_tips"), r.get("cash_tips"),
+            r.get("service_charge"), r.get("covers"),
             r.get("wage_cost"), r.get("cashed_up_by"), r.get("discrepancy_note"),
             json.dumps(r.get("raw")),
         ])
@@ -201,10 +209,18 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--dry-run", action="store_true", help="show mapping + sample, no DB write")
     args = p.parse_args(argv)
 
-    targets = {args.site: SHEETS[args.site]} if args.site else SHEETS
+    # Skip cleanly (no failure) until Google credentials are configured --
+    # same guard nory/bookings use -- so a deployment without cash-off (or
+    # before its key lands) ships dark instead of flagging the nightly run.
+    if not os.getenv("GCP_KEY_JSON") and not os.path.exists(KEY_PATH):
+        log.warning("Cash-off: no GCP_KEY_JSON env var and no key file at %s "
+                    "-- skipping cash-off ingest.", KEY_PATH)
+        return 0
+
     if args.site and args.site not in SHEETS:
         log.error("Unknown site '%s'. Known: %s", args.site, ", ".join(SHEETS))
         return 1
+    targets = {args.site: SHEETS[args.site]} if args.site else SHEETS
 
     service = _sheets_service()
     conn = None if args.dry_run else psycopg2.connect(settings.database_url)

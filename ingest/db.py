@@ -259,6 +259,151 @@ def upsert_sales_batch(conn, blid: int, sales: list[dict]) -> tuple[int, int, in
     return len(sale_rows), len(line_rows), len(pay_rows)
 
 
+# --- StoreKit online orders -------------------------------------------------
+def _int_pence(v: Any) -> int | None:
+    """StoreKit money is already integer pence; coerce defensively."""
+    if v is None or v == "":
+        return None
+    try:
+        return int(round(float(v)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _map_storekit_order(d: dict) -> tuple:
+    """Map an order.created `data` block to a storekit_orders row tuple."""
+    venue = d.get("venue") or {}
+    cust = d.get("customer") or {}
+    table = d.get("table") or {}
+    return (
+        d.get("id"),
+        venue.get("id"),
+        venue.get("name"),
+        venue.get("slug"),
+        d.get("code"),
+        d.get("orderType"),
+        d.get("asap"),
+        _dt(d.get("createdAt")),
+        _dt(d.get("deliveryTime")),
+        _int_pence(d.get("total")),
+        _int_pence(d.get("tip")),
+        _int_pence(d.get("deliveryFee")),
+        _int_pence(d.get("discountTotal")),
+        cust.get("firstName"),
+        cust.get("lastName"),
+        cust.get("email"),
+        cust.get("phone"),
+        cust.get("marketingConsent"),
+        table.get("covers"),
+        _j(d.get("items")),
+        _j(d),
+    )
+
+
+_STOREKIT_ORDER_SQL = """
+INSERT INTO storekit_orders (order_id,venue_id,venue_name,venue_slug,code,
+    order_type,asap,created_at,delivery_time,total_pence,tip_pence,
+    delivery_fee_pence,discount_pence,customer_first,customer_last,
+    customer_email,customer_phone,marketing_consent,covers,items,raw,
+    last_event,last_svix_id,updated_at)
+VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
+ON CONFLICT (order_id) DO UPDATE SET
+    venue_id=EXCLUDED.venue_id, venue_name=EXCLUDED.venue_name,
+    venue_slug=EXCLUDED.venue_slug, code=EXCLUDED.code,
+    order_type=EXCLUDED.order_type, asap=EXCLUDED.asap,
+    created_at=EXCLUDED.created_at, delivery_time=EXCLUDED.delivery_time,
+    total_pence=EXCLUDED.total_pence, tip_pence=EXCLUDED.tip_pence,
+    delivery_fee_pence=EXCLUDED.delivery_fee_pence,
+    discount_pence=EXCLUDED.discount_pence, customer_first=EXCLUDED.customer_first,
+    customer_last=EXCLUDED.customer_last, customer_email=EXCLUDED.customer_email,
+    customer_phone=EXCLUDED.customer_phone,
+    marketing_consent=EXCLUDED.marketing_consent, covers=EXCLUDED.covers,
+    items=EXCLUDED.items, raw=EXCLUDED.raw, last_event=EXCLUDED.last_event,
+    last_svix_id=EXCLUDED.last_svix_id, updated_at=now();
+"""
+
+# Lifecycle/refund events carry only {order id, code, status, venue}. We patch
+# an existing row, or insert a stub if the event arrives before order.created
+# (out-of-order delivery). status/refund only ever move forward.
+_STOREKIT_STATUS_SQL = """
+INSERT INTO storekit_orders (order_id,venue_id,venue_name,status,is_refunded,
+    refund_total_pence,last_event,last_svix_id,updated_at)
+VALUES (%s,%s,%s,%s,%s,%s,%s,%s,now())
+ON CONFLICT (order_id) DO UPDATE SET
+    status = CASE WHEN EXCLUDED.status <> '' THEN EXCLUDED.status
+                  ELSE storekit_orders.status END,
+    is_refunded = storekit_orders.is_refunded OR EXCLUDED.is_refunded,
+    refund_total_pence = COALESCE(EXCLUDED.refund_total_pence,
+                                  storekit_orders.refund_total_pence),
+    venue_id = COALESCE(storekit_orders.venue_id, EXCLUDED.venue_id),
+    venue_name = COALESCE(storekit_orders.venue_name, EXCLUDED.venue_name),
+    last_event = EXCLUDED.last_event, last_svix_id = EXCLUDED.last_svix_id,
+    updated_at = now();
+"""
+
+# Status string a given event implies (None = leave status unchanged).
+_STOREKIT_EVENT_STATUS = {
+    "order.accepted": "accepted",
+    "order.preparing": "preparing",
+    "order.ready_for_pickup": "ready_for_pickup",
+    "order.out_for_delivery": "out_for_delivery",
+    "order.completed": "completed",
+    "order.rejected": "rejected",
+    "order.canceled": "canceled",
+    "order.refund.created": None,   # refund flag only; status untouched
+}
+
+
+def seen_webhook(conn, svix_id: str, event_type: str, order_id: str | None) -> bool:
+    """Record a delivery; return True if this svix-id was already processed.
+
+    At-least-once delivery means duplicates are expected; the PK on svix_id
+    makes this the dedupe gate (per StoreKit's idempotency guidance).
+    """
+    if not svix_id:
+        return False
+    with conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO storekit_webhook_events (svix_id,event_type,order_id)
+               VALUES (%s,%s,%s) ON CONFLICT (svix_id) DO NOTHING;""",
+            (svix_id, event_type, order_id),
+        )
+        return cur.rowcount == 0   # 0 rows inserted => already seen
+
+
+def upsert_storekit_order(conn, data: dict, svix_id: str, event_type: str) -> None:
+    """Full upsert from an order.created / order.accepted payload."""
+    row = _map_storekit_order(data) + (event_type, svix_id)
+    with conn.cursor() as cur:
+        cur.execute(_STOREKIT_ORDER_SQL, row)
+
+
+def patch_storekit_status(conn, data: dict, svix_id: str, event_type: str) -> None:
+    """Patch status / refund flag from a slim lifecycle event payload."""
+    order = data.get("order") or {}
+    venue = data.get("venue") or {}
+    refund = data.get("refund") or {}
+    order_id = order.get("id") or data.get("id")
+    if not order_id:
+        return
+    status = _STOREKIT_EVENT_STATUS.get(event_type)
+    is_refunded = event_type == "order.refund.created"
+    with conn.cursor() as cur:
+        cur.execute(
+            _STOREKIT_STATUS_SQL,
+            (
+                order_id,
+                venue.get("id"),
+                venue.get("name"),
+                status or "",
+                is_refunded,
+                _int_pence(refund.get("amount")) if is_refunded else None,
+                event_type,
+                svix_id,
+            ),
+        )
+
+
 def get_stored_refresh_token(conn) -> str | None:
     with conn.cursor() as cur:
         cur.execute("SELECT refresh_token FROM oauth_token WHERE id = 1")

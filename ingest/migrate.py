@@ -40,8 +40,17 @@ def main(argv: list[str] | None = None) -> int:
                         help="skip seed_categories.sql (preserve edited rules)")
     args = parser.parse_args(argv)
 
-    files = ["schema.sql", "bookings_schema.sql", "views.sql", "views_sentiment.sql",
-             "views_bookings.sql"]
+    # Order matters: the patch re-defines v_report_lines (adds line_staff),
+    # views_staff defines v_staff_hours_day, views_eotw defines v_line_staff --
+    # all needed before views_plates. All files are idempotent, so this list is
+    # safe to re-run on an existing DB and builds a fresh DB (e.g. zindiya)
+    # completely. (Previously views_staff/views_eotw/the patch were applied by
+    # hand on the T&T DB, which broke fresh-DB migrations at views_plates.)
+    files = ["schema.sql", "bookings_schema.sql", "storekit_schema.sql",
+             "views.sql", "patch_line_staff_and_payment_method.sql",
+             "views_sentiment.sql", "views_bookings.sql",
+             "views_booking_pace.sql", "views_staff.sql", "views_eotw.sql",
+             "views_plates.sql", "views_storekit.sql"]
     if not args.no_seed:
         files.append("seed_categories.sql")
 
