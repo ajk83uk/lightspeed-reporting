@@ -43,7 +43,10 @@ def _j(v: Any) -> str | None:
 
 
 def connect():
-    conn = psycopg2.connect(settings.database_url)
+    # .strip() guards against a trailing newline sneaking into DATABASE_URL when
+    # it's pasted into a host's env-var field (Railway), which otherwise surfaces
+    # as psycopg2 'invalid sslmode value: "require\n"'.
+    conn = psycopg2.connect(settings.database_url.strip())
     conn.autocommit = False
     return conn
 
