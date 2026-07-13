@@ -29,7 +29,7 @@ lines AS (      -- per receipt: sales + upsell item counts
     SUM(rl.net_ex_vat) AS sales_exvat,
     SUM(rl.quantity) FILTER(WHERE rl.item_category='desserts') AS dessert_qty,
     SUM(rl.quantity) FILTER(WHERE rl.item_category IN ('cocktails','241 cocktails')) AS cocktail_qty,
-    SUM(rl.quantity) FILTER(WHERE rl.item_category IN ('loaded chips','croquettes')) AS special_qty,
+    SUM(rl.quantity) FILTER(WHERE rl.item_category IN ('loaded chips','croquettes','railway chicken curry')) AS special_qty,
     SUM(rl.quantity) FILTER(WHERE rl.wet_dry='wet') AS drink_qty
   FROM v_report_lines rl GROUP BY 1,2
 )
@@ -106,5 +106,34 @@ FROM v_staff_day d
 LEFT JOIN cat  c ON c.business_location_id=d.business_location_id AND c.staff=d.staff AND c.business_date=d.business_date
 LEFT JOIN turn t ON t.business_location_id=d.business_location_id AND t.staff=d.staff AND t.business_date=d.business_date
 LEFT JOIN v_staff_hours_day h ON h.business_location_id=d.business_location_id AND h.staff=d.staff AND h.business_date=d.business_date;
+
+-- Per site/staff/month count of 5-star reviews whose text mentions the staff's
+-- first name. Replicates Daysi's manual "type each name into 5-star reviews"
+-- step for the Monthly Staff Report (Metabase dashboard 595, cards 496/497).
+-- Depends on v_sentiment_reviews (views_sentiment.sql runs earlier in migrate).
+-- Word-boundary match (\m..\M) avoids substring hits; generic non-name logins
+-- are excluded. Approximate by nature: misspelt or unnamed reviews are missed,
+-- shared first names are double-counted -- same trade-offs as the manual method.
+CREATE OR REPLACE VIEW v_staff_reviews_month AS
+WITH staff AS (
+  SELECT DISTINCT business_location_id, site, staff,
+    regexp_replace(staff,'[^a-zA-Z]','','g') AS nm
+  FROM v_staff_scorecard_day
+  WHERE staff NOT IN ('Manager','Bar','Floor','Staff','Team','Host','Server',
+                      'Kitchen','Chef','Duty','Waiter','Waitress','Admin','Trainee')
+),
+rev AS (
+  SELECT business_location_id, review_month, review_text
+  FROM v_sentiment_reviews
+  WHERE rating >= 5 AND COALESCE(review_text,'') <> ''
+)
+SELECT s.business_location_id, s.site, s.staff, r.review_month AS mth,
+       COUNT(*) AS reviews
+FROM staff s
+JOIN rev r
+  ON r.business_location_id = s.business_location_id
+ AND length(s.nm) >= 3
+ AND r.review_text ~* ('\m'||s.nm||'\M')
+GROUP BY 1,2,3,4;
 
 COMMIT;

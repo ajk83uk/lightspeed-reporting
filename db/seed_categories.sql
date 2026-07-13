@@ -92,11 +92,19 @@ INSERT INTO category_rules (dimension, category, match_type, match_value, priori
     ('item_category', 'loaded chips', 'name_like', '.lamb mince%',      30),
     ('item_category', 'loaded chips', 'name_like', '.paneer makhani%',  30);
 
--- MONTHLY SPECIALS. Loaded Chips (above) and Croquettes are the current monthly
--- specials; tracked by units sold per site. Croquettes is a normal priced item
--- ("Lamb Croquette"). Update these when the monthly special changes.
+-- MONTHLY SPECIALS. The monthly special rotates. Each one gets its OWN item
+-- category so historical months stay correct (the aggregate "specials" metric
+-- unions all of them -- see special_qty in views_staff.sql and the Metabase
+-- specials cards 170/186). Only one special sells in any given month, so the
+-- union double-counts nothing.
+--   May 2026: Lamb Croquette (normal priced item)
+--   Jun 2026: Loaded Chips (tagged 'loaded chips' above)
+--   Jul 2026: Railway Chicken Curry (normal priced base item)
+-- When the special changes: add a new rule below, then append its category to
+-- the special_qty IN-list (views_staff.sql) and the specials cards.
 INSERT INTO category_rules (dimension, category, match_type, match_value, priority) VALUES
-    ('item_category', 'croquettes', 'name_like', '%croquet%', 30);
+    ('item_category', 'croquettes',            'name_like', '%croquet%',                30),
+    ('item_category', 'railway chicken curry', 'name_like', '%railway chicken curry%',  30);
 
 -- LUNCH MENU. The lunch menu is two bowl options — "Curry Bowl" and "Salad Bowl"
 -- — each a normal priced base item with the choice (curry/salad) sitting on a
