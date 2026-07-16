@@ -76,6 +76,14 @@ def storekit_webhook():
 
     event = payload.get("event", "")
     data = payload.get("data") or {}
+    # StoreKit sends the full order events (order.created) as the BARE order
+    # object with NO {"event","data"} envelope, while the slim lifecycle events
+    # (ready_for_pickup, completed, ...) ARE enveloped. Their docs claim
+    # everything is enveloped -- it isn't. Detect the bare order by its shape
+    # (top-level id + total + venue) and normalise it to an order.created event.
+    if not event and payload.get("id") is not None and "total" in payload and payload.get("venue"):
+        event = "order.created"
+        data = payload
     svix_id = request.headers.get("svix-id", "")
     # best-effort order id for the dedupe log
     order_id = data.get("id") or (data.get("order") or {}).get("id")
