@@ -73,7 +73,7 @@ FIELD_MATCHERS = [
     ("cashed_up_by",    lambda h: "cashed up" in h),
     ("discrepancy_note", lambda h: "discrepancy" in h or "explanation" in h),
     ("card_sales",      lambda h: "card machine" in h or ("card" in h and "total" in h and "tip" not in h)),
-    ("total_sales",     lambda h: "total sales" in h),
+    ("total_sales",     lambda h: "total sales" in h or "total collected" in h),
 ]
 NUMERIC_FIELDS = {"total_sales", "card_sales", "online_orders", "uber_eats", "just_eat",
                   "deliveroo", "petty_cash", "expected_cash", "actual_cash",

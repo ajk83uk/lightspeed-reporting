@@ -47,10 +47,13 @@ def main(argv: list[str] | None = None) -> int:
     # completely. (Previously views_staff/views_eotw/the patch were applied by
     # hand on the T&T DB, which broke fresh-DB migrations at views_plates.)
     files = ["schema.sql", "bookings_schema.sql", "storekit_schema.sql",
+             "peazi_schema.sql", "manager_report_schema.sql",
              "views.sql", "patch_line_staff_and_payment_method.sql",
              "views_sentiment.sql", "views_bookings.sql",
              "views_booking_pace.sql", "views_staff.sql", "views_eotw.sql",
-             "views_plates.sql", "views_storekit.sql"]
+             "views_plates.sql", "views_storekit.sql",
+             "views_storekit_lightspeed.sql", "views_kitchen.sql",
+             "views_manager_report.sql"]
     if not args.no_seed:
         files.append("seed_categories.sql")
 

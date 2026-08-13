@@ -106,6 +106,17 @@ INSERT INTO category_rules (dimension, category, match_type, match_value, priori
     ('item_category', 'croquettes',            'name_like', '%croquet%',                30),
     ('item_category', 'railway chicken curry', 'name_like', '%railway chicken curry%',  30);
 
+-- NEW CONVENTION from Aug 2026: one rolling 'monthly specials' category matched
+-- by SKU (exact product codes). v_staff_day counts item_category='monthly
+-- specials' for business_date >= 2026-08-01 and the frozen legacy list (loaded
+-- chips/croquettes/railway) before that, so history never shifts. To rotate the
+-- special: swap the SKU rows below (keep old months' NAMED categories above for
+-- pre-Aug history).
+--   Aug 2026: Chicken Biriyani (3641), Paneer Biriyani (3646)
+INSERT INTO category_rules (dimension, category, match_type, match_value, priority) VALUES
+    ('item_category', 'monthly specials', 'sku', '3641', 30),
+    ('item_category', 'monthly specials', 'sku', '3646', 30);
+
 -- LUNCH MENU. The lunch menu is two bowl options — "Curry Bowl" and "Salad Bowl"
 -- — each a normal priced base item with the choice (curry/salad) sitting on a
 -- modifier line. Counting the base bowl lines = number of lunch covers sold.

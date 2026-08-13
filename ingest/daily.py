@@ -22,12 +22,14 @@ import sys
 
 from . import run as run_mod
 from . import cashoff as cashoff_mod
+from . import manager_report as manager_report_mod
 from . import sentiment as sentiment_mod
 from . import sentiment_email as sentiment_email_mod
 from . import sentiment_gcs as sentiment_gcs_mod
 from . import sentiment_s3 as sentiment_s3_mod
 from . import nory as nory_mod
 from . import bookings as bookings_mod
+from . import peazi as peazi_mod
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
@@ -48,6 +50,13 @@ STEPS = [
     # if FT_AUTH_TOKEN isn't set yet, so it ships dark until the env var lands.
     ("bookings",  lambda: bookings_mod.main([])),
     ("cashoff",   lambda: cashoff_mod.main([])),
+    # Manager's Daily Report (single Google Form sheet, all sites). Latest
+    # submission per (site, night) wins on upsert. Skips cleanly if the Google
+    # key isn't set, same as cash-off.
+    ("manager_report", lambda: manager_report_mod.main([])),
+    # Peazi market-stall product sales (Zindiya @ Saint Pauls). Rolling window
+    # re-pull; skips cleanly until PEAZI_SITE/PEAZI_USER_ID are set.
+    ("peazi",     lambda: peazi_mod.main([])),
     # Sentiment Search review feed. Three independent sources, each a safe no-op
     # until configured, so exactly one (or none) does work on a given night:
     #   * email -- pull daily CSV attachments from the inbox (GMAIL_* set)

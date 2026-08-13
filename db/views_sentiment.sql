@@ -52,6 +52,9 @@ LEFT JOIN sentiment_site_map m USING (sentiment_label);
 
 -- Cross-source headline: monthly rating / NPS vs cash-off sales & covers per
 -- site. cashoff_daily.site already matches the nickname, so it joins directly.
+-- NOTE: sales here stay on the cash-off form deliberately — this is a HISTORICAL
+-- correlation (reviews run Jan 2025–Mar 2026) and Lightspeed sales only start
+-- late May 2026, so there is no date overlap to source them from the POS.
 CREATE OR REPLACE VIEW v_sentiment_site_month AS
 WITH cash AS (
     SELECT site,

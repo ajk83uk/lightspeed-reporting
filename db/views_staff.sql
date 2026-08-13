@@ -29,7 +29,12 @@ lines AS (      -- per receipt: sales + upsell item counts
     SUM(rl.net_ex_vat) AS sales_exvat,
     SUM(rl.quantity) FILTER(WHERE rl.item_category='desserts') AS dessert_qty,
     SUM(rl.quantity) FILTER(WHERE rl.item_category IN ('cocktails','241 cocktails')) AS cocktail_qty,
-    SUM(rl.quantity) FILTER(WHERE rl.item_category IN ('loaded chips','croquettes','railway chicken curry')) AS special_qty,
+    -- Monthly specials: from 2026-08-01 the rolling 'monthly specials' category
+    -- (SKU rules in seed_categories.sql, swapped monthly); before that the
+    -- frozen legacy per-special list, so historical months never shift.
+    SUM(rl.quantity) FILTER(WHERE
+        (rl.business_date >= DATE '2026-08-01' AND rl.item_category = 'monthly specials')
+     OR (rl.business_date <  DATE '2026-08-01' AND rl.item_category IN ('loaded chips','croquettes','railway chicken curry'))) AS special_qty,
     SUM(rl.quantity) FILTER(WHERE rl.wet_dry='wet') AS drink_qty
   FROM v_report_lines rl GROUP BY 1,2
 )

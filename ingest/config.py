@@ -155,6 +155,19 @@ class Settings:
     # Gap between calls; FT throttles at the global level if load spikes.
     ft_throttle_secs: float = float(os.getenv("FT_THROTTLE_SECS", "0.4"))
 
+    # --- Peazi (order & pay; Zindiya's Saint Pauls Market stall) ------------
+    # Console report endpoints on cloudfunctions.net; plain GET, no auth
+    # header. Step skips cleanly until PEAZI_SITE + PEAZI_USER_ID are set.
+    peazi_site: str = os.getenv("PEAZI_SITE", "")
+    peazi_user_id: str = os.getenv("PEAZI_USER_ID", "")
+    peazi_labels: str = os.getenv("PEAZI_LABELS", "")
+    peazi_window_days: int = int(os.getenv("PEAZI_WINDOW_DAYS", "7"))
+    peazi_throttle_secs: float = float(os.getenv("PEAZI_THROTTLE_SECS", "0.3"))
+
+    @property
+    def peazi_labels_list(self) -> list:
+        return [x for x in self.peazi_labels.replace(" ", "").split(",") if x]
+
     # --- StoreKit online orders (webhook push, Svix) -----------------------
     # The receiver (ingest/storekit_webhook.py) runs as a SEPARATE always-on
     # Railway web service; it does NOT run in the nightly cron. Signature
