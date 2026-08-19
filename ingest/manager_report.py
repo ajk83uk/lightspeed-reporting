@@ -207,6 +207,13 @@ def main(argv: list[str] | None = None) -> int:
                     KEY_PATH)
         return 0
 
+    # A deployment can opt out entirely (e.g. the Zindiya service, which has
+    # the Google key for cash-off but no manager-report form of its own):
+    # set MANAGER_REPORT_SHEET to "off" (or empty).
+    if SHEET_ID.strip().lower() in ("", "off", "none", "0"):
+        log.warning("Manager report: MANAGER_REPORT_SHEET is '%s' -- skipping.", SHEET_ID)
+        return 0
+
     service = _sheets_service()
     values = read_sheet(service, SHEET_ID)
     if not values:
