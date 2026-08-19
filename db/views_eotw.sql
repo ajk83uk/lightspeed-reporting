@@ -7,7 +7,11 @@
 
 BEGIN;
 DROP VIEW IF EXISTS v_staff_eotw_day;
-DROP VIEW IF EXISTS v_line_staff;
+-- CASCADE: v_plates_per_cover_staff (views_plates.sql) reads v_line_staff and is
+-- built AFTER this file, so re-running this file alone must drop it too. Always
+-- follow this file with views_plates.sql to put it back:
+--     python -m ingest.apply_sql views_eotw.sql views_plates.sql
+DROP VIEW IF EXISTS v_line_staff CASCADE;
 
 -- Every report line + who actually rang it.
 CREATE VIEW v_line_staff AS
