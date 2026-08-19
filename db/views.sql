@@ -158,49 +158,4 @@ LEFT JOIN sites site
 WHERE COALESCE(sa.cancelled, FALSE) = FALSE
   AND COALESCE(sl.raw->>'voidReason', '') <> '';
 
--- ---------------------------------------------------------------------------
--- Unified LEAKAGE view: voided lines AND discounted lines in one table, tagged
--- by leakage_type ('Void' / 'Discount'). Single relation -> Metabase field
--- filters (date / site / staff / shift / type) map cleanly. `amount` is the
--- positive money lost (void value or discount given).
--- ---------------------------------------------------------------------------
-CREATE OR REPLACE VIEW v_leakage_lines AS
-SELECT
-    sl.business_location_id,
-    site.nickname AS site,
-    sl.account_reference, sl.line_id, sl.name,
-    'Void'::text  AS leakage_type,
-    sl.raw->>'voidReason' AS reason,
-    COALESCE(NULLIF(sl.raw->>'staffName',''), '(unknown)') AS staff_name,
-    -sl.net_without_tax AS amount,
-    (sa.time_closed AT TIME ZONE 'Europe/London')::date AS business_date,
-    CASE
-        WHEN EXTRACT(HOUR FROM (COALESCE(sl.time_of_sale, sa.time_closed) AT TIME ZONE 'Europe/London')) BETWEEN 12 AND 16 THEN 'Lunch (12-5)'
-        WHEN EXTRACT(HOUR FROM (COALESCE(sl.time_of_sale, sa.time_closed) AT TIME ZONE 'Europe/London')) BETWEEN 17 AND 21 THEN 'Dinner (5-10)'
-        ELSE 'Other' END AS shift,
-    COALESCE(sl.time_of_sale, sa.time_closed) AS tx_time
-FROM sales_lines sl
-JOIN sales sa ON sa.business_location_id = sl.business_location_id AND sa.account_reference = sl.account_reference
-LEFT JOIN sites site ON site.business_location_id = sl.business_location_id
-WHERE COALESCE(sa.cancelled, FALSE) = FALSE AND COALESCE(sl.raw->>'voidReason','') <> ''
-UNION ALL
-SELECT
-    sl.business_location_id,
-    site.nickname,
-    sl.account_reference, sl.line_id, sl.name,
-    'Discount'::text,
-    COALESCE(NULLIF(sl.raw->>'discountName',''), '(unnamed)'),
-    COALESCE(NULLIF(sl.raw->>'staffName',''), '(unknown)'),
-    sl.discount_amount,
-    (sa.time_closed AT TIME ZONE 'Europe/London')::date,
-    CASE
-        WHEN EXTRACT(HOUR FROM (COALESCE(sl.time_of_sale, sa.time_closed) AT TIME ZONE 'Europe/London')) BETWEEN 12 AND 16 THEN 'Lunch (12-5)'
-        WHEN EXTRACT(HOUR FROM (COALESCE(sl.time_of_sale, sa.time_closed) AT TIME ZONE 'Europe/London')) BETWEEN 17 AND 21 THEN 'Dinner (5-10)'
-        ELSE 'Other' END,
-    COALESCE(sl.time_of_sale, sa.time_closed)
-FROM sales_lines sl
-JOIN sales sa ON sa.business_location_id = sl.business_location_id AND sa.account_reference = sl.account_reference
-LEFT JOIN sites site ON site.business_location_id = sl.business_location_id
-WHERE COALESCE(sa.cancelled, FALSE) = FALSE AND COALESCE(sl.discount_amount, 0) <> 0;
-
 COMMIT;

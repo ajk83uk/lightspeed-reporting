@@ -40,6 +40,13 @@ def main(argv: list[str] | None = None) -> int:
                         help="skip seed_categories.sql (preserve edited rules)")
     args = parser.parse_args(argv)
 
+    # KNOWN ISSUE (Aug 2026): re-running this whole list against an EXISTING db
+    # fails at views.sql -- "cannot drop columns from view" -- because the patch
+    # file below has already added line_staff/line_staff_id to v_report_lines,
+    # and views.sql's CREATE OR REPLACE would remove them. Fresh databases are
+    # fine. To ship a change to specific views meanwhile, use:
+    #     python -m ingest.apply_sql <file>.sql [...]
+    #
     # Order matters: the patch re-defines v_report_lines (adds line_staff),
     # views_staff defines v_staff_hours_day, views_eotw defines v_line_staff --
     # all needed before views_plates. All files are idempotent, so this list is
@@ -49,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     files = ["schema.sql", "bookings_schema.sql", "storekit_schema.sql",
              "peazi_schema.sql", "manager_report_schema.sql",
              "views.sql", "patch_line_staff_and_payment_method.sql",
+             "views_leakage.sql",
              "views_sentiment.sql", "views_bookings.sql",
              "views_booking_pace.sql", "views_staff.sql", "views_eotw.sql",
              "views_plates.sql", "views_storekit.sql",

@@ -19,7 +19,7 @@ JOIN sales_lines sl ON sl.business_location_id=rl.business_location_id
   AND sl.account_reference=rl.account_reference AND sl.line_id=rl.line_id;
 
 -- Per (site, server, day): line-level sales/upsell/wet (by ringer), primary-server
--- covers/sales/tips (dominant ringer per receipt), voids (by ringer), clocked hours.
+-- covers/sales/tips/voids (dominant ringer per receipt), clocked hours.
 CREATE VIEW v_staff_eotw_day AS
 WITH ls AS (
   SELECT business_location_id bl, site, line_staff staff, business_date,
@@ -37,7 +37,12 @@ pday AS (
     SUM(COALESCE((SELECT SUM(tip) FROM payments py WHERE py.business_location_id=s.business_location_id AND py.account_reference=s.account_reference),0)) p_tips
   FROM prim p JOIN sales s ON s.business_location_id=p.bl AND s.account_reference=p.ar
   JOIN recagg ra ON ra.bl=p.bl AND ra.ar=p.ar WHERE p.rn=1 GROUP BY 1,2,3 ),
-vd AS (SELECT business_location_id bl, staff_name staff, business_date, SUM(amount) void_value FROM v_leakage_lines WHERE leakage_type='Void' GROUP BY 1,2,3),
+-- Voids: attributed to the receipt's PRIMARY SERVER, not to staff_name. LS stamps
+-- staff_name on a void with whoever performed/authorised it, which is the manager
+-- holding the void permission -- that penalised managers and gave a free pass to
+-- anyone who cannot void. attributed_staff (v_leakage_lines) applies the same
+-- dominant-ringer rule used for covers/tips above.
+vd AS (SELECT business_location_id bl, attributed_staff staff, business_date, SUM(amount) void_value FROM v_leakage_lines WHERE leakage_type='Void' GROUP BY 1,2,3),
 hrs AS (SELECT business_location_id bl, staff, business_date, SUM(hours) hours FROM v_staff_hours_day GROUP BY 1,2,3),
 spine AS (SELECT DISTINCT bl, staff, business_date FROM (
   SELECT bl,staff,business_date FROM ls
