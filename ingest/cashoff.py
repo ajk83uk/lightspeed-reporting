@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import sys
+import time
 from datetime import date, datetime
 
 import psycopg2
@@ -158,14 +159,44 @@ def _sheets_service():
     return build("sheets", "v4", credentials=creds, cache_discovery=False)
 
 
+# Google Sheets occasionally hangs a request until the socket read times out
+# (seen 2026-08-20: TimeoutError inside spreadsheets().get on the Southampton
+# sheet). Retry the transient classes -- read timeouts, dropped connections and
+# 429/5xx -- before giving up on the site.
+_RETRY_ATTEMPTS = 3
+_RETRY_BACKOFF = 5  # seconds; doubles each attempt
+
+
+def _is_transient(exc: Exception) -> bool:
+    if isinstance(exc, (TimeoutError, ConnectionError, OSError)):
+        return True
+    status = getattr(getattr(exc, "resp", None), "status", None)
+    return status in (429, 500, 502, 503, 504)
+
+
+def _execute(request):
+    """Run a Google API request, retrying transient failures with backoff."""
+    delay = _RETRY_BACKOFF
+    for attempt in range(1, _RETRY_ATTEMPTS + 1):
+        try:
+            return request().execute()
+        except Exception as exc:  # noqa: BLE001 -- re-raised below if not transient
+            if attempt == _RETRY_ATTEMPTS or not _is_transient(exc):
+                raise
+            log.warning("Sheets call failed (%s: %s); retry %d/%d in %ds",
+                        type(exc).__name__, exc, attempt, _RETRY_ATTEMPTS - 1, delay)
+            time.sleep(delay)
+            delay *= 2
+
+
 def read_sheet(service, sheet_id: str) -> list[list]:
     """Read the values of the first tab of a spreadsheet."""
-    meta = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+    meta = _execute(lambda: service.spreadsheets().get(spreadsheetId=sheet_id))
     first_tab = meta["sheets"][0]["properties"]["title"]
-    resp = service.spreadsheets().values().get(
+    resp = _execute(lambda: service.spreadsheets().values().get(
         spreadsheetId=sheet_id, range=f"'{first_tab}'!A:AZ",
         valueRenderOption="UNFORMATTED_VALUE", dateTimeRenderOption="FORMATTED_STRING",
-    ).execute()
+    ))
     return resp.get("values", [])
 
 
@@ -224,31 +255,45 @@ def main(argv: list[str] | None = None) -> int:
 
     service = _sheets_service()
     conn = None if args.dry_run else psycopg2.connect(settings.database_url)
+    # Isolate each site the way daily.py isolates steps: one unreadable sheet
+    # must not abort the loop and silently drop every site after it in SHEETS
+    # order (2026-08-20: a Southampton read timeout cost us Portsmouth and
+    # Bournemouth too). Still exits non-zero so the nightly run is flagged.
+    failed: list[str] = []
     try:
         for site, sid in targets.items():
-            values = read_sheet(service, sid)
-            if not values:
-                log.warning("[%s] sheet is empty", site)
-                continue
-            header, rows = values[0], values[1:]
-            recs, cmap = parse_rows(header, rows)
-            mapped = {f: header[i] for f, i in cmap.items() if i < len(header)}
-            log.info("[%s] mapped columns: %s", site, mapped)
-            missing = [f for f, _ in FIELD_MATCHERS if f not in cmap]
-            if missing:
-                log.info("[%s] (no column matched for: %s)", site, ", ".join(missing))
-            log.info("[%s] parsed %d day(s)", site, len(recs))
-            if args.dry_run:
-                for r in sorted(recs, key=lambda x: x["business_date"])[-3:]:
-                    log.info("   %s: deliveroo=%s ubereats=%s justeat=%s online=%s actual_cash=%s",
-                             r["business_date"], r.get("deliveroo"), r.get("uber_eats"),
-                             r.get("just_eat"), r.get("online_orders"), r.get("actual_cash"))
-            else:
-                n = upsert(conn, site, recs)
-                log.info("[%s] upserted %d day(s)", site, n)
+            try:
+                values = read_sheet(service, sid)
+                if not values:
+                    log.warning("[%s] sheet is empty", site)
+                    continue
+                header, rows = values[0], values[1:]
+                recs, cmap = parse_rows(header, rows)
+                mapped = {f: header[i] for f, i in cmap.items() if i < len(header)}
+                log.info("[%s] mapped columns: %s", site, mapped)
+                missing = [f for f, _ in FIELD_MATCHERS if f not in cmap]
+                if missing:
+                    log.info("[%s] (no column matched for: %s)", site, ", ".join(missing))
+                log.info("[%s] parsed %d day(s)", site, len(recs))
+                if args.dry_run:
+                    for r in sorted(recs, key=lambda x: x["business_date"])[-3:]:
+                        log.info("   %s: deliveroo=%s ubereats=%s justeat=%s online=%s actual_cash=%s",
+                                 r["business_date"], r.get("deliveroo"), r.get("uber_eats"),
+                                 r.get("just_eat"), r.get("online_orders"), r.get("actual_cash"))
+                else:
+                    n = upsert(conn, site, recs)
+                    log.info("[%s] upserted %d day(s)", site, n)
+            except Exception:  # noqa: BLE001 -- isolate sites from each other
+                failed.append(site)
+                log.exception("[%s] cash-off ingest FAILED -- continuing with other sites", site)
+                if conn:
+                    conn.rollback()
     finally:
         if conn:
             conn.close()
+    if failed:
+        log.error("Cash-off finished WITH FAILURES: %s", ", ".join(failed))
+        return 1
     return 0
 
 
