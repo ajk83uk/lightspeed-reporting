@@ -1,0 +1,113 @@
+# ---------------------------------------------------------------------------
+# Reminders — "tell this site to do X at this time on this day".
+#
+# These query nothing. No SQL, no thresholds. They fire on a schedule and say
+# something. For recurring tasks the sites need prompting on: bins, stock
+# counts, cleaning, checks, deadlines.
+#
+# The same hourly Railway service runs these. Adding one is a config change:
+# edit, commit, push. Live from the next matching hour. Railway is never
+# touched again.
+#
+# Always test first — these go to real staff groups:
+#     python -m notify.brief --rule <key> --dry-run
+# ---------------------------------------------------------------------------
+
+reminders:
+
+  # --- Bins: one site, night before collection -------------------------------
+  - key: bournemouth-bins-thursday
+    enabled: false                 # flip to true when you want it live
+    title: Bins out for Thursday collection
+    schedule: "0 21 * * 3"         # Wednesdays 21:00 — night before
+    sites: [tt-bournemouth]
+    route: site
+    message: |
+      *Bins out tonight* 🗑
+      Collection is tomorrow morning. Please put the bins out before you lock up.
+
+  # --- Stock counts: every site, monthly -------------------------------------
+  - key: crockery-count-monthly
+    enabled: false
+    title: Crockery count
+    schedule: "0 10 1 * *"         # 1st of the month, 10:00
+    route: site
+    message: |
+      *Crockery count due*
+      Full count this week please — plates, bowls and serving dishes.
+      Send the numbers over once done so we can order replacements.
+
+  - key: glassware-count-monthly
+    enabled: false
+    title: Glassware count
+    schedule: "0 10 15 * *"        # 15th of the month, 10:00
+    route: site
+    message: |
+      *Glassware count due*
+      Full count this week please. Note anything running low or heavily chipped.
+
+  # --- Weekly operational prompt, every site ---------------------------------
+  - key: wednesday-rota-prompt
+    enabled: false
+    title: Start next week's rota
+    schedule: "0 10 * * 3"         # Wednesdays 10:00
+    route: site
+    message: |
+      *Rota reminder*
+      Please start planning next week's rota today so it's ready for sign-off.
+
+  # --- A shared group rather than per-site -----------------------------------
+  - key: south-coast-managers-meeting
+    enabled: false
+    title: Managers' call reminder
+    schedule: "0 9 * * 1"          # Mondays 09:00
+    route: group:south_coast       # posts once, to the group
+    message: |
+      *Managers' call today, 3pm*
+      Numbers from last week to hand please.
+
+# ---------------------------------------------------------------------------
+# Fields
+# ---------------------------------------------------------------------------
+#   key        unique across BOTH this file and alerts.yaml. It is also the
+#              idempotency handle, so a re-run can never double-post.
+#   enabled    false parks it without deleting it
+#   title      shown in `--list` and in the Railway logs
+#   schedule   5-field cron in UK LOCAL time — follows the clocks by itself.
+#              The service runs hourly, so hour + day matter; minute is ignored.
+#
+#                "0 21 * * 3"    Wednesdays 21:00
+#                "0 10 * * 1-5"  weekdays 10:00
+#                "0 9 * * 1,4"   Mondays and Thursdays 09:00
+#                "0 10 1 * *"    1st of the month, 10:00
+#                "0 10 28 * *"   28th of the month, 10:00
+#
+#              Days: 0 or 7 = Sunday, 1 = Monday ... 6 = Saturday
+#              Omit `schedule` entirely and it never fires on its own — a safe
+#              way to park a draft that can still be run by hand with --rule.
+#
+#   sites      optional list of site keys. Omit for every site on ZenZap.
+#                tt-solihull  tt-peterborough  tt-portsmouth
+#                tt-bournemouth  tt-southampton
+#              An unknown key is an error, not a silent no-op — a typo would
+#              otherwise mean the reminder just never arrives.
+#
+#   route      site               each targeted site's own chat
+#              group:south_coast  once, to the South Coast Sites group
+#              group:announcements  once, to Group Announcements (think first)
+#              none               logged only, nothing sent
+#
+#   message    what gets sent. {site_display} is the only placeholder available —
+#              reminders have no query, so there are no data fields.
+#
+# ---------------------------------------------------------------------------
+# Quiet hours
+# ---------------------------------------------------------------------------
+# Reminders respect each site's quiet_hours in sites.yaml (default 23:00–08:00).
+# A reminder scheduled inside that window is HELD, not sent — these land on
+# personal phones.
+#
+# So "bins out at 21:00" works, but "fridge temps at 07:00" would never arrive.
+# If you need something before 08:00, widen that site's quiet_hours in
+# sites.yaml first, or schedule it for 08:00.
+# ---------------------------------------------------------------------------

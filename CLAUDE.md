@@ -57,6 +57,18 @@ nickname has a trailing dot: `Tap Bournemouth.`**. business_location_id map:
 - Example `item_category` values: `poppadoms`, `241 cocktails`, `desserts`, `loaded chips`,
   `croquettes`, `lunch menu`.
 
+## Outbound messaging (`notify/`)
+`notify/` sends the daily site brief and labour alerts to staff **ZenZap** groups.
+It reads Neon directly (`notify/db.py`, SELECT-only) — do not route it through the
+Metabase API. Runs as its own Railway cron service (`railway.brief.json`).
+
+Rules live in `notify/config/alerts.yaml`; adding an alert is a config change, not
+a code change. Read `notify/README.md` before touching it — it documents the send
+cap, the idempotent `externalId`, the BST/GMT double-cron, and why the £ figure is
+derived from hours rather than Nory's `planned_col`.
+
+Messages go to real staff groups. Always `--dry-run` first.
+
 ## Conventions
 - Money is GBP. `net_ex_vat` = ex-VAT, `net_inc_vat` = inc-VAT.
 - Default reporting window for "last night" = `business_date = current_date - 1`.

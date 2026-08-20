@@ -1,0 +1,281 @@
+# ---------------------------------------------------------------------------
+# Metabase -> ZenZap alert rules.
+#
+# Each rule: pull rows from Metabase, keep the ones that breach, send one
+# message per site to that site's own chat.
+#
+# Add a rule here, not in code. `jobs/metabase_alerts.py` is generic.
+#
+# Test any rule without sending:
+#     python jobs/metabase_alerts.py --rule <key> --dry-run
+# ---------------------------------------------------------------------------
+
+defaults:
+  database: 2                 # neondb = Tap & Tandoor
+  site_column: site_name      # column holding the Nory site name
+  max_sites_per_run: 5        # refuse to send more than this in one go
+
+rules:
+
+  # -------------------------------------------------------------------------
+  - key: daily-site-brief
+    enabled: true
+    title: Morning brief — last night, then today
+    schedule: "0 11 * * *"      # 11:00 daily, all sites
+    description: >
+      The one message every site gets every day. Reads back-to-front on
+      purpose: last night is what they already have an opinion about, so it
+      earns attention, and today is what they can still change.
+
+      Sales value is deliberately absent — GMs have their own number in their
+      head and any mismatch destroys trust in the whole message. Spend per
+      head, wet/dry and drinks per cover are the levers they actually control.
+
+      MONETARY EFFECT: computed as hours variance x the site's OWN actual
+      hourly rate, NOT as (col - planned_col). Nory's planned_col runs at
+      £19.70-£25.68/hr against an actual of £14.76-£16.14 — a different cost
+      basis (almost certainly fully-loaded: NI, pension, holiday accrual).
+      Subtracting them shows every site "saving" money every night, including
+      Solihull on 18 Aug when it worked 0.5 hrs OVER schedule. Deriving from
+      hours keeps the £ consistent with the hours on the line above it.
+
+      Joins on business_location_id where possible; Nory joins by site name,
+      which matches the bookings naming ("Solihull"), not the POS naming
+      ("Tap Solihull").
+    sql: |
+      WITH ln AS (
+        -- Covers come from v_site_day_apc.covers_clean, NOT v_site_day.covers,
+        -- so covers x spend-per-head actually equals dining revenue. The two
+        -- views count differently (124 vs 120 at Solihull on 19 Aug) and a GM
+        -- who checks the arithmetic and finds it doesn't tie stops trusting
+        -- every other number in the message.
+        SELECT sd.business_location_id AS loc, sd.business_date,
+               a.covers_clean               AS covers,
+               ROUND(sd.wet_pct)            AS wet_pct,
+               ROUND(sd.dry_pct)            AS dry_pct,
+               ROUND(sd.drinks_per_cover,2) AS dpc,
+               ROUND(a.apc_dining,2)        AS apc
+        FROM v_site_day sd
+        LEFT JOIN v_site_day_apc a
+               ON a.business_location_id = sd.business_location_id
+              AND a.biz_date = sd.business_date
+        WHERE sd.business_date = CURRENT_DATE - 1
+      ),
+      lw AS (   -- same weekday last week: the only fair comparison in hospitality
+        SELECT business_location_id AS loc, covers_clean AS covers_lw
+        FROM v_site_day_apc WHERE biz_date = CURRENT_DATE - 8
+      ),
+      sitemap AS (   -- bookings carries both the id and the Nory-style name
+        SELECT DISTINCT site, business_location_id AS loc
+        FROM v_bookings_site_day WHERE business_location_id IS NOT NULL
+      ),
+      lab AS (
+        SELECT m.loc,
+               n.hours          AS act_hours,
+               n.planned_hours  AS sch_hours,
+               ROUND(n.hours - n.planned_hours, 1) AS hrs_var,
+               -- see description: derive £ from hours x the site's own actual rate
+               ROUND((n.hours - n.planned_hours) * (n.col / NULLIF(n.hours,0))) AS money_var
+        FROM nory_labour_daily n
+        JOIN sitemap m ON m.site = n.site_name
+        WHERE n.biz_date = CURRENT_DATE - 1
+      ),
+      tb AS (
+        SELECT business_location_id AS loc, live_covers, live_bookings
+        FROM v_bookings_site_day WHERE booking_date = CURRENT_DATE
+      ),
+      pace AS (  -- typical same-day walk-ins for this weekday, 12-week average
+        SELECT m.loc,
+               ROUND(p.avg_sameday_covers) AS exp_walkins,
+               ROUND(p.avg_total_covers)   AS typical_total
+        FROM v_booking_pace_dow p
+        JOIN sitemap m ON m.site = p.site
+        WHERE p.dow_iso = EXTRACT(ISODOW FROM CURRENT_DATE)
+      )
+      SELECT ln.loc::text AS location_id,
+             ln.business_date,
+             CURRENT_DATE  AS today,
+             ln.covers, ln.apc, ln.wet_pct, ln.dry_pct, ln.dpc,
+             lw.covers_lw,
+             lab.act_hours, lab.sch_hours, lab.hrs_var,
+             ABS(lab.money_var)                                        AS money_abs,
+             CASE WHEN lab.hrs_var > 0 THEN 'over' ELSE 'under' END    AS hrs_dir,
+             CASE WHEN lab.hrs_var > 0 THEN 'cost'  ELSE 'saved' END   AS money_dir,
+             ABS(lab.hrs_var)                                          AS hrs_abs,
+             COALESCE(tb.live_covers, 0)   AS booked_today,
+             COALESCE(tb.live_bookings, 0) AS bookings_today,
+             pace.exp_walkins,
+             pace.typical_total,
+             COALESCE(tb.live_covers,0) + COALESCE(pace.exp_walkins,0) AS expect_total,
+             -- Wednesday-only nudge. Empty string the rest of the week, so the
+             -- template renders identically and no placeholder is left behind.
+             CASE WHEN EXTRACT(ISODOW FROM CURRENT_DATE) = 3
+                  THEN E'\n\n📋 It is Wednesday today. Please start planning your rotas for the following week.'
+                  ELSE '' END AS rota_note
+      FROM ln
+      LEFT JOIN lw   ON lw.loc   = ln.loc
+      LEFT JOIN lab  ON lab.loc  = ln.loc
+      LEFT JOIN tb   ON tb.loc   = ln.loc
+      LEFT JOIN pace ON pace.loc = ln.loc
+      ORDER BY ln.loc
+    condition: always            # a brief, not an alert — always sends
+    route: site
+    message: |
+      *{site_display}*
+
+      *Last night — {business_date:date}*
+      Dine-in covers: {covers}  (same day last week: {covers_lw})
+      Dine-in spend per head: £{apc}
+      Wet / dry: {wet_pct}% / {dry_pct}%
+      Drinks per cover: {dpc}
+      Hours: {act_hours} actual v {sch_hours} scheduled — {hrs_abs} {hrs_dir} (£{money_abs} {money_dir})
+
+      *Today — {today:date}*
+      Booked: {booked_today} covers ({bookings_today} bookings)
+      Typical walk-ins: {exp_walkins}
+      Expect around {expect_total} — a normal one is {typical_total}{rota_note}
+
+  # -------------------------------------------------------------------------
+  - key: labour-hours-over
+    enabled: true
+    title: Labour hours over schedule
+    schedule: "15 9 * * *"      # 09:15 daily, after the overnight Nory sync
+    description: >
+      Actual hours worked exceeded scheduled hours for the last completed
+      trading day. Uses HOURS, not labour %, because the sales column in
+      nory_labour_daily is unreliable — see the data-quality note below.
+    sql: |
+      SELECT site_name,
+             biz_date,
+             hours,
+             planned_hours,
+             ROUND(hours - planned_hours, 1)                         AS hours_var,
+             ROUND(((hours - planned_hours) / NULLIF(planned_hours,0)) * 100, 1) AS pct_var,
+             col                                                     AS labour_cost,
+             planned_col                                             AS planned_labour_cost,
+             sales
+      FROM nory_labour_daily
+      WHERE biz_date = (SELECT MAX(biz_date) FROM nory_labour_daily)
+    condition:
+      # Both must trip. One alone means small sites alert on rounding and
+      # get trained to ignore it.
+      all:
+        - column: hours_var
+          op: ">="
+          value: 2.0
+        - column: pct_var
+          op: ">="
+          value: 5.0
+    message: |
+      *Labour hours over schedule — {site_display}*
+      {biz_date:date}
+
+      Scheduled: {planned_hours} hrs
+      Actual:    {hours} hrs
+      Over by:   {hours_var} hrs ({pct_var}%)
+
+      Worth a look at what drove it.
+    route: site
+
+
+  # -------------------------------------------------------------------------
+  - key: labour-hours-saved
+    enabled: true
+    title: Came in under schedule — well done
+    schedule: "15 9 * * *"
+    description: >
+      The other half of labour-hours-over. A system that only ever messages
+      people when something is wrong gets read as nagging and stops working
+      within a month. Same thresholds as the overrun rule, inverted, so
+      praise is as hard to earn as criticism is — which is what makes it
+      worth anything.
+    sql: |
+      SELECT site_name,
+             biz_date,
+             hours,
+             planned_hours,
+             ROUND(planned_hours - hours, 1)                                     AS hours_saved,
+             ROUND(((planned_hours - hours) / NULLIF(planned_hours,0)) * 100, 1)  AS pct_saved
+      FROM nory_labour_daily
+      WHERE biz_date = (SELECT MAX(biz_date) FROM nory_labour_daily)
+    condition:
+      all:
+        - column: hours_saved
+          op: ">="
+          value: 2.0
+        - column: pct_saved
+          op: ">="
+          value: 5.0
+    message: |
+      *Nice one, {site_display}* 👏
+      {biz_date:date}
+
+      Scheduled: {planned_hours} hrs
+      Actual:    {hours} hrs
+      Came in {hours_saved} hrs under ({pct_saved}%)
+
+      Good control of the shift — thanks.
+    route: site
+
+  # -------------------------------------------------------------------------
+  - key: labour-pct-over-target
+    # DISABLED. Do not enable until the sales column is fixed.
+    #
+    # Southampton and Peterborough report sales = 0 on every row in
+    # nory_labour_daily, which makes their labour % 0.0 — indistinguishable
+    # from "excellent" rather than "no data". The other three sites show
+    # 26%-78% swings that look more like partial sales sync than real
+    # performance. An alert on this today would be silently blind to two
+    # sites and noisy on the rest.
+    #
+    # Fix the Nory sales sync first, then flip enabled to true.
+    enabled: false
+    title: Labour % over 30% target
+    schedule: "15 9 * * *"
+    sql: |
+      SELECT site_name, biz_date, percentage AS labour_pct, sales, col AS labour_cost
+      FROM nory_labour_daily
+      WHERE biz_date = (SELECT MAX(biz_date) FROM nory_labour_daily)
+        AND sales > 0          -- guard: never treat missing sales as 0%
+    condition:
+      all:
+        - column: labour_pct
+          op: ">"
+          value: 30.0
+    message: |
+      *Labour {labour_pct}% of sales — {site_display}*
+      {biz_date:date}
+
+      Target is 30%.
+      Labour £{labour_cost} on £{sales} sales.
+    route: site
+
+  # -------------------------------------------------------------------------
+  - key: nory-sales-not-syncing
+    enabled: true
+    title: Nory sales feed is down for a site
+    schedule: "30 9 * * *"
+    description: >
+      Data-quality alarm, not an ops alert. If sales is 0 the labour % is
+      meaningless, and any % based rule goes quietly blind for that site.
+      This is currently firing for Southampton and Peterborough every day.
+    sql: |
+      SELECT site_name,
+             biz_date,
+             COUNT(*)                                    AS days_checked,
+             SUM(CASE WHEN sales = 0 THEN 1 ELSE 0 END)  AS days_zero
+      FROM nory_labour_daily
+      WHERE biz_date >= CURRENT_DATE - INTERVAL '7 days'
+      GROUP BY site_name, biz_date
+      HAVING SUM(CASE WHEN sales = 0 THEN 1 ELSE 0 END) > 0
+    condition:
+      all:
+        - column: days_zero
+          op: ">="
+          value: 1
+    # Goes to Ajay, not to the site — nobody at site level can fix a sync.
+    route: none
+    message: |
+      *Nory sales not syncing — {site_display}*
+      No sales figure on {biz_date:date}. Labour % is unusable for this site
+      until the feed is fixed.

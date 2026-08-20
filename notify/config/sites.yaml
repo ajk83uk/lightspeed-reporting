@@ -1,0 +1,141 @@
+# ---------------------------------------------------------------------------
+# Site registry — the single source of truth for "which site is which"
+# across Lightspeed, Nory, Favourite Table, Metabase and ZenZap.
+#
+# This file is the thing you will edit most often. Everything else is plumbing.
+#
+# ZenZap topics are referenced by their GROUP NAME as it appears in the app.
+# ZenZap's externalId can only be set at topic creation, and your groups already
+# exist — so names are the only handle we have. `jobs/resolve_topics.py` pins
+# each name to its UUID in config/topic_ids.yaml, and runtime reads the UUID.
+# Nothing here creates a new group.
+#
+# Verify current state at any time with:
+#     python jobs/check_connection.py
+# ---------------------------------------------------------------------------
+
+defaults:
+  timezone: Europe/London
+  quiet_hours:            # no automated messages inside this window
+    start: "23:00"
+    end: "08:00"
+  # Alert thresholds are NOT here — they live in config/alerts.yaml, next to
+  # the query they apply to. This file answers "which site is which".
+
+# Shared ZenZap groups — BROADCAST targets, used when a message genuinely
+# concerns several sites at once. They are NOT escalation destinations:
+# anything site-specific stays in that site's own chat, full stop.
+groups:
+  announcements:
+    zenzap_topic: "Group Announcements"     # all sites
+    note: >
+      Everyone. Reserved for genuine all-estate messages. No automation posts
+      here by default — it's the fastest group to train people to mute.
+
+  south_coast:
+    zenzap_topic: "South Coast Sites"
+    note: >
+      Bournemouth, Portsmouth, Southampton + their managers. Use only for
+      messages that concern all three at once.
+    covers: [tt-bournemouth, tt-portsmouth, tt-southampton]
+
+  # Solihull and Peterborough are standalone by design — no regional grouping.
+
+sites:
+  - key: tt-solihull
+    name: Tap & Tandoor Solihull
+    brand: tap-and-tandoor
+    region: standalone
+    # --- external system identifiers (fill in as you wire each up) ---
+    # Join keys. business_location_id is the reliable one — site NAMES differ
+    # across sources ("Solihull" in Nory/bookings, "Tap Solihull" in POS views).
+    lightspeed_location_id: "1718940401139720"
+    nory_branch_id: "67e6daca000f330025929e40"
+    pos_site_name: "Tap Solihull"          # v_site_day.site
+    bookings_site_name: "Solihull"
+    nory_location_name: "Solihull"
+    favourite_table_venue: "Tap & Tandoor Solihull"
+    site_inbox: ""
+    # --- ZenZap routing ---
+    # zenzap_topic is the site's existing chat, named after the town.
+    # Must match the group name in ZenZap exactly (case-insensitive).
+    zenzap_topic: "Solihull"
+
+  - key: tt-peterborough
+    name: Tap & Tandoor Peterborough
+    brand: tap-and-tandoor
+    region: standalone
+    # Join keys. business_location_id is the reliable one — site NAMES differ
+    # across sources ("Solihull" in Nory/bookings, "Tap Peterborough" in POS views).
+    lightspeed_location_id: "1718940401139719"
+    nory_branch_id: "67e6daee701cde0025b8d074"
+    pos_site_name: "Tap Peterborough"          # v_site_day.site
+    bookings_site_name: "Peterborough"
+    nory_location_name: "Peterborough"
+    favourite_table_venue: "Tap & Tandoor Peterborough"
+    site_inbox: ""
+    zenzap_topic: "Peterborough"
+
+  - key: tt-portsmouth
+    name: Tap & Tandoor Portsmouth
+    brand: tap-and-tandoor
+    region: south-coast
+    # Join keys. business_location_id is the reliable one — site NAMES differ
+    # across sources ("Solihull" in Nory/bookings, "Tap Portsmouth" in POS views).
+    lightspeed_location_id: "1718940401139718"
+    nory_branch_id: "67e6da84097cea00257e151c"
+    pos_site_name: "Tap Portsmouth"          # v_site_day.site
+    bookings_site_name: "Portsmouth"
+    nory_location_name: "Portsmouth"
+    favourite_table_venue: "Tap & Tandoor Portsmouth"
+    site_inbox: ""
+    zenzap_topic: "Portsmouth"
+
+  - key: tt-bournemouth
+    name: Tap & Tandoor Bournemouth
+    brand: tap-and-tandoor
+    region: south-coast
+    # Join keys. business_location_id is the reliable one — site NAMES differ
+    # across sources ("Solihull" in Nory/bookings, "Tap Bournemouth." in POS views).
+    lightspeed_location_id: "1718940401139714"
+    nory_branch_id: "67e6db108f8afc001e8cdd23"
+    pos_site_name: "Tap Bournemouth."          # v_site_day.site
+    bookings_site_name: "Bournemouth"
+    # NOTE: "Bournemouth (Darts)" is a separate bookings venue with a NULL
+    # location id. It folds into this site — see v_bookings_site_day.
+    nory_location_name: "Bournemouth"
+    favourite_table_venue: "Tap & Tandoor Bournemouth"
+    site_inbox: ""
+    zenzap_topic: "Bournemouth"
+
+  - key: tt-southampton
+    name: Tap & Tandoor Southampton
+    brand: tap-and-tandoor
+    region: south-coast
+    # Join keys. business_location_id is the reliable one — site NAMES differ
+    # across sources ("Solihull" in Nory/bookings, "Tap Southampton" in POS views).
+    lightspeed_location_id: "1718940401139717"
+    nory_branch_id: "67e6da9fb9e17500250a6ca7"
+    pos_site_name: "Tap Southampton"          # v_site_day.site
+    bookings_site_name: "Southampton"
+    nory_location_name: "Southampton"
+    favourite_table_venue: "Tap & Tandoor Southampton"
+    site_inbox: ""
+    zenzap_topic: "Southampton"
+
+  # Zindiya does NOT use ZenZap. It stays in this registry because it still has
+  # Lightspeed, Nory and Favourite Table data — the registry is the source of
+  # truth for all systems, not just messaging. Jobs skip it for notifications.
+  - key: zindiya-moseley
+    name: Zindiya
+    brand: zindiya
+    region: midlands
+    lightspeed_location_id: ""
+    nory_location_name: "Zindiya"
+    favourite_table_venue: "Zindiya"
+    site_inbox: ""
+    zenzap_topic: null              # no ZenZap at this site
+    overrides:
+      # Zindiya trades later; no automated messages before 09:00.
+      quiet_hours:
+        end: "09:00"

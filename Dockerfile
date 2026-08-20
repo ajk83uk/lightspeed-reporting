@@ -7,8 +7,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY ingest/ ./ingest/
 COPY db/ ./db/
+COPY notify/ ./notify/
 
-# Default command is a no-op help; the scheduler overrides it, e.g.
-#   python -m ingest.run sales
-#   python -m ingest.run items
+# Default command is a no-op help; each Railway service overrides it:
+#   python -m ingest.run sales     (manual)
+#   python -m ingest.daily         (railway.json,       cron 05:30 UTC)
+#   python -m notify.brief         (railway.brief.json, cron 10:00 UTC)
 CMD ["python", "-m", "ingest.run", "--help"]
