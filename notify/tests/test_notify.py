@@ -466,6 +466,8 @@ def test_example_reminders_ship_disabled():
     enabled, five sites would get a cellar-clean prompt nobody asked for."""
     from notify.alerts import load_reminders
     for r in load_reminders():
+        if r.key.startswith("pipeline-test-"):
+            continue          # deliberate one-off, dated, deletes itself by date
         assert r.enabled is False, f"{r.key} is an example and must ship off"
 
 
@@ -494,3 +496,104 @@ def test_bins_reminder_is_the_night_before_collection():
     assert r.due_now(datetime(2026, 8, 20, 21, 0, tzinfo=london)) is False  # Thu
     assert r.due_now(datetime(2026, 8, 19, 20, 0, tzinfo=london)) is False  # 8pm
     assert r.sites == ["tt-bournemouth"]
+
+
+# ------------------------------------------------- pasted-credential hygiene
+
+def test_trailing_newline_in_env_is_stripped(monkeypatch):
+    """Railway (and every other hosting panel) happily stores a trailing
+    newline when you paste a value. Symptoms are baffling:
+      base_url   -> DNS lookup for 'api.zenzap.co%0a'
+      api_secret -> HMAC over wrong bytes, silent 401
+    This cost a live 11:00 run on 20 Aug 2026. Strip everything."""
+    from notify.zenzap import ZenZapClient
+
+    monkeypatch.setenv("ZENZAP_BASE_URL", "https://api.zenzap.co\n")
+    monkeypatch.setenv("ZENZAP_API_KEY", "  abc123  ")
+    monkeypatch.setenv("ZENZAP_API_SECRET", "secret\r\n")
+
+    c = ZenZapClient()
+    assert c.base_url == "https://api.zenzap.co"
+    assert "\n" not in c.base_url and "%0a" not in c.base_url
+    assert c.api_key == "abc123"
+    assert c.api_secret == "secret"
+
+
+def test_trailing_slash_on_base_url_is_trimmed(monkeypatch):
+    """Otherwise every request URL contains a double slash."""
+    from notify.zenzap import ZenZapClient
+    monkeypatch.setenv("ZENZAP_BASE_URL", "https://api.zenzap.co/")
+    assert ZenZapClient().base_url == "https://api.zenzap.co"
+
+
+def test_network_failure_is_a_zenzap_error(monkeypatch):
+    """A raw requests exception used to escape and abort the whole run on the
+    first site, so sites 2-5 silently got nothing. It must be catchable so the
+    loop can record that site as failed and carry on."""
+    import requests
+    from notify.zenzap import ZenZapClient, ZenZapError
+
+    def boom(*a, **kw):
+        raise requests.exceptions.ConnectionError("dns is having a day")
+
+    monkeypatch.setenv("ZENZAP_API_KEY", "k")
+    monkeypatch.setenv("ZENZAP_API_SECRET", "s")
+    monkeypatch.setattr(requests, "request", boom)
+
+    with pytest.raises(ZenZapError, match="unreachable"):
+        ZenZapClient().send_message("hi", topic_id="abc", external_id="x")
+
+
+def test_day_of_month_is_honoured():
+    """The parser originally read the day-of-month field and ignored it, so
+    "0 10 1 * *" (1st of the month) would have fired at 10:00 EVERY day.
+    Caught before crockery-count-monthly was ever enabled."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    london = ZoneInfo("Europe/London")
+    r = _rule("0 10 1 * *")
+
+    assert r.due_now(datetime(2026, 9, 1, 10, 0, tzinfo=london)) is True    # 1st
+    assert r.due_now(datetime(2026, 9, 2, 10, 0, tzinfo=london)) is False   # 2nd
+    assert r.due_now(datetime(2026, 10, 1, 10, 0, tzinfo=london)) is True   # 1st again
+    assert r.due_now(datetime(2026, 9, 1, 11, 0, tzinfo=london)) is False   # wrong hour
+
+
+def test_month_is_honoured():
+    """"0 12 20 8 *" = 20 August only, not the 20th of every month."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    london = ZoneInfo("Europe/London")
+    r = _rule("0 12 20 8 *")
+
+    assert r.due_now(datetime(2026, 8, 20, 12, 0, tzinfo=london)) is True
+    assert r.due_now(datetime(2026, 9, 20, 12, 0, tzinfo=london)) is False  # Sept
+    assert r.due_now(datetime(2026, 8, 21, 12, 0, tzinfo=london)) is False  # 21st
+
+
+def test_dom_and_dow_together_is_refused():
+    """Standard cron ORs them, which nobody expects. Refuse rather than guess."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    r = _rule("0 10 1 * 1")
+    with pytest.raises(AlertConfigError, match="day-of-month and a day-of-week"):
+        r.due_now(datetime(2026, 9, 1, 10, 0, tzinfo=ZoneInfo("Europe/London")))
+
+
+def test_every_shipped_schedule_parses_and_fires_somewhere():
+    """Every rule's schedule must be valid and actually reachable — a rule that
+    can never fire looks configured but silently does nothing."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    from notify.alerts import load_all
+    london = ZoneInfo("Europe/London")
+
+    start = datetime(2026, 1, 1, tzinfo=london)
+    for rule in load_all():
+        if not rule.schedule:
+            continue
+        fires = any(
+            rule.due_now(start + timedelta(hours=h))
+            for h in range(24 * 400)          # 400 days covers monthly + annual
+        )
+        assert fires, f"{rule.key}: schedule {rule.schedule!r} never fires"

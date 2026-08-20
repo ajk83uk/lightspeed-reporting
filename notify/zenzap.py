@@ -48,7 +48,22 @@ DEFAULT_SCOPES = (
 
 
 class ZenZapError(RuntimeError):
-    """Raised when the ZenZap API returns a non-success response."""
+    """Raised when the ZenZap API returns a non-success response, or is
+    unreachable. Network failures are wrapped in this so a single site's
+    send can fail without taking the whole run down with it."""
+
+
+def _env(name: str) -> Optional[str]:
+    """Read an env var, stripped of surrounding whitespace.
+
+    Also trims a trailing slash from URLs so base_url + path can't produce a
+    double slash.
+    """
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    value = value.strip()
+    return value.rstrip("/") if value.startswith("http") else value
 
 
 _LOCKFILE = Path(__file__).resolve().parent / "config" / "topic_ids.yaml"
@@ -72,11 +87,18 @@ def _load_topic_lockfile(path: Path = _LOCKFILE) -> dict:
 
 @dataclass
 class ZenZapClient:
-    base_url: str = field(default_factory=lambda: os.environ.get("ZENZAP_BASE_URL", DEFAULT_BASE_URL))
-    client_id: Optional[str] = field(default_factory=lambda: os.environ.get("ZENZAP_CLIENT_ID"))
-    client_secret: Optional[str] = field(default_factory=lambda: os.environ.get("ZENZAP_CLIENT_SECRET"))
-    api_key: Optional[str] = field(default_factory=lambda: os.environ.get("ZENZAP_API_KEY"))
-    api_secret: Optional[str] = field(default_factory=lambda: os.environ.get("ZENZAP_API_SECRET"))
+    # _env() strips whitespace. Pasting a value into a hosting panel very often
+    # brings a trailing newline with it, and every symptom is baffling:
+    #   base_url  -> DNS lookup for "api.zenzap.co%0a", "Name or service not known"
+    #   api_secret-> HMAC computed over the wrong bytes, silent 401
+    #   api_key   -> 401 with a key that looks correct on screen
+    # Cheaper to strip than to diagnose. ingest/db.py does the same for
+    # DATABASE_URL, for the same reason.
+    base_url: str = field(default_factory=lambda: _env("ZENZAP_BASE_URL") or DEFAULT_BASE_URL)
+    client_id: Optional[str] = field(default_factory=lambda: _env("ZENZAP_CLIENT_ID"))
+    client_secret: Optional[str] = field(default_factory=lambda: _env("ZENZAP_CLIENT_SECRET"))
+    api_key: Optional[str] = field(default_factory=lambda: _env("ZENZAP_API_KEY"))
+    api_secret: Optional[str] = field(default_factory=lambda: _env("ZENZAP_API_SECRET"))
     scopes: str = DEFAULT_SCOPES
     timeout: int = 20
 
@@ -152,7 +174,14 @@ class ZenZapClient:
             headers["X-Signature"] = self.sign(self.api_secret, ts, signed_payload or "")
             headers["X-Timestamp"] = str(ts)
 
-        resp = requests.request(method, url, headers=headers, data=data, timeout=self.timeout)
+        try:
+            resp = requests.request(method, url, headers=headers, data=data,
+                                    timeout=self.timeout)
+        except requests.exceptions.RequestException as exc:
+            # DNS failure, timeout, connection reset. Previously this escaped as
+            # a raw requests exception and aborted the entire run on the first
+            # site, so a blip mid-loop meant sites 2-5 silently got nothing.
+            raise ZenZapError(f"{method} {path} unreachable: {exc}") from exc
 
         if resp.status_code >= 400:
             raise ZenZapError(f"{method} {path} failed [{resp.status_code}]: {resp.text}")

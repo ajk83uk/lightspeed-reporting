@@ -60,13 +60,20 @@ class Rule:
         One Railway service runs hourly and asks every rule this question, so
         adding a message at a new time is a config change, not a new service.
 
-        Supports `M H * * *` (daily) and `M H * * D` (weekday, 0/7=Sun..6=Sat,
-        or a comma list / range). The minute is ignored — the service fires
-        once an hour, so hour + day is the real granularity. A rule with no
-        schedule never runs automatically; it can still be run by hand with
-        --rule.
+        Fields: minute hour day-of-month month day-of-week
 
-        Times are Europe/London, so this follows the clocks by itself.
+        The MINUTE is ignored — the service fires once an hour, so the hour is
+        the finest granularity available. Every other field is honoured:
+
+            "0 11 * * *"     every day at 11:00
+            "0 9 * * 1"      Mondays at 09:00
+            "0 9 * * 1-5"    weekdays at 09:00
+            "0 10 1 * *"     1st of the month at 10:00
+            "0 12 20 8 *"    20 August at 12:00
+
+        A rule with no schedule never fires automatically; it can still be run
+        by hand with --rule. Times are Europe/London, so this follows the
+        clocks by itself.
         """
         if not self.schedule:
             return False
@@ -77,23 +84,43 @@ class Rule:
                 f"Rule '{self.key}': schedule {self.schedule!r} must have 5 "
                 f"cron fields, e.g. '0 11 * * *'"
             )
-        _minute, hour, _dom, _month, dow = parts
+        _minute, hour, dom, month, dow = parts
 
-        if hour != "*" and now.hour != int(hour):
-            return False
-
-        if dow != "*":
-            # cron: 0 and 7 both mean Sunday; Python: Monday=0..Sunday=6
-            today = (now.weekday() + 1) % 7
+        def field_matches(field: str, value: int, wrap: int | None = None) -> bool:
+            """True if `value` satisfies a cron field (*, n, a-b, or a list)."""
+            if field == "*":
+                return True
             allowed: set[int] = set()
-            for token in dow.split(","):
+            for token in field.split(","):
                 if "-" in token:
-                    lo, hi = (int(x) % 7 for x in token.split("-"))
-                    allowed |= set(range(lo, hi + 1)) if lo <= hi else set()
+                    lo, hi = (int(x) for x in token.split("-"))
+                    if wrap is not None:
+                        lo, hi = lo % wrap, hi % wrap
+                    allowed |= set(range(lo, hi + 1))
                 else:
-                    allowed.add(int(token) % 7)
-            if today not in allowed:
-                return False
+                    n = int(token)
+                    allowed.add(n % wrap if wrap is not None else n)
+            return value in allowed
+
+        # Standard cron ORs day-of-month against day-of-week when BOTH are
+        # restricted, which almost nobody expects. Rather than silently guess,
+        # refuse — no real reminder needs "the 1st AND Mondays".
+        if dom != "*" and dow != "*":
+            raise AlertConfigError(
+                f"Rule '{self.key}': schedule {self.schedule!r} sets both a "
+                f"day-of-month and a day-of-week. Standard cron treats that as "
+                f"OR, which is rarely what is meant. Use one or the other."
+            )
+
+        if not field_matches(hour, now.hour):
+            return False
+        if not field_matches(month, now.month):
+            return False
+        if not field_matches(dom, now.day):
+            return False
+        # cron: 0 and 7 both mean Sunday; Python: Monday=0..Sunday=6
+        if not field_matches(dow, (now.weekday() + 1) % 7, wrap=7):
+            return False
 
         return True
 
