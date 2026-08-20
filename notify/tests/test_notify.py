@@ -597,3 +597,123 @@ def test_every_shipped_schedule_parses_and_fires_somewhere():
             for h in range(24 * 400)          # 400 days covers monthly + annual
         )
         assert fires, f"{rule.key}: schedule {rule.schedule!r} never fires"
+
+
+# ------------------------------------------------------------- what is live
+
+def test_only_the_morning_brief_messages_anyone():
+    """Agreed 20 Aug 2026: one message a day, the morning brief, and nothing
+    else until a schedule is signed off.
+
+    This test is the guard. If someone enables a rule without that decision
+    being revisited, this fails rather than five sites quietly getting an
+    extra message every morning. Dated pipeline tests are exempt.
+    """
+    from notify.alerts import load_all
+
+    senders = [
+        r.key for r in load_all()
+        if r.enabled and r.route != "none" and not r.key.startswith("pipeline-test-")
+    ]
+    assert senders == ["daily-site-brief"], (
+        f"Expected only daily-site-brief to be live, found: {senders}. "
+        f"If this is deliberate, update this test in the same commit."
+    )
+
+
+# ------------------------------------------------------- live sport block
+
+from notify import sport
+
+
+def test_channel_is_matched_on_fixture_id_not_team_name():
+    """The whole reason channels come from FANZO rather than a TV listings
+    site: the join is on a numeric id, so 'Man United' vs 'Manchester United'
+    and the Man Utd / Man City collision simply cannot arise."""
+    fixture = {"id": 767984, "url": "https://example.test/f"}
+    page = (
+        '<script id="__NEXT_DATA__" type="application/json">'
+        '{"props":{"pageProps":{"extraData":{"TVGuide":{"tvGuideSSRData":{"data":['
+        '{"id":767983,"name":"Arsenal vs Coventry",'
+        ' "channels":[{"name":"Sky Sports Main Event"}]},'
+        '{"id":767984,"name":"Hull City vs Man United",'
+        ' "channels":[{"name":"TNT Sports 1"}]}'
+        ']}}}}}}</script>'
+    )
+
+    class FakeResp:
+        text = page
+        def raise_for_status(self): pass
+
+    real, sport.requests.get = sport.requests.get, lambda *a, **k: FakeResp()
+    try:
+        assert sport._channels_for(fixture) == "TNT Sports 1"
+    finally:
+        sport.requests.get = real
+
+
+def test_fixture_with_no_channel_is_still_shown(monkeypatch):
+    """A missing channel must be visible in the message, not hidden by
+    dropping the fixture."""
+    monkeypatch.setattr(sport, "fanzo_fixtures", lambda *a, **k: [
+        {"id": 1, "time": "16:10", "name": "South Africa vs New Zealand",
+         "competition": "International", "sport": "Rugby Union",
+         "is_big": True, "url": None, "channel": None},
+    ])
+    monkeypatch.setattr(sport, "_channels_for", lambda f: None)
+    out = sport.block()
+    assert "South Africa vs New Zealand" in out and "16:10" in out
+
+
+def test_fixtures_are_listed_in_kick_off_order(monkeypatch):
+    monkeypatch.setattr(sport, "_channels_for", lambda f: "Sky Sports")
+    monkeypatch.setattr(sport, "fanzo_fixtures", lambda *a, **k: sorted([
+        {"id": 2, "time": "17:30", "name": "B vs C", "competition": "PL",
+         "sport": "Football", "is_big": False, "url": None, "channel": None},
+        {"id": 1, "time": "12:30", "name": "A vs D", "competition": "PL",
+         "sport": "Football", "is_big": False, "url": None, "channel": None},
+    ], key=lambda f: f["time"]))
+    out = sport.block()
+    assert out.index("12:30") < out.index("17:30")
+
+
+def test_block_is_empty_when_nothing_is_on(monkeypatch):
+    monkeypatch.setattr(sport, "fanzo_fixtures", lambda *a, **k: [])
+    assert sport.block() == ""
+
+
+def test_a_dead_source_costs_the_sport_block_not_the_brief(monkeypatch):
+    """Both calls hit an undocumented third-party endpoint. If either dies,
+    the morning brief must still go out."""
+    def boom(*a, **k):
+        raise RuntimeError("fanzo is down")
+
+    monkeypatch.setattr(sport, "fanzo_fixtures", boom)
+    assert sport.block() == ""                     # no exception escapes
+
+    # fixtures fine, channel lookup dead -> times still sent
+    monkeypatch.setattr(sport, "fanzo_fixtures", lambda *a, **k: [
+        {"id": 1, "time": "20:00", "name": "Arsenal vs Coventry",
+         "competition": "Premier League", "sport": "Football",
+         "is_big": True, "url": "https://example.test/f", "channel": None}])
+    monkeypatch.setattr(sport, "requests", type("R", (), {"get": staticmethod(boom)}))
+    out = sport.block()
+    assert "Arsenal vs Coventry" in out
+
+
+def test_no_sound_note_in_the_message(monkeypatch):
+    """Dropped at Ajay's request, 20 Aug 2026 — sites manage sound themselves."""
+    monkeypatch.setattr(sport, "_channels_for", lambda f: "Sky Sports F1")
+    monkeypatch.setattr(sport, "fanzo_fixtures", lambda *a, **k: [
+        {"id": 1, "time": "15:30", "name": "Dutch Grand Prix", "competition":
+         "F1", "sport": "Motor Sports", "is_big": False, "url": None,
+         "channel": None}])
+    assert "sound" not in sport.block().lower()
+
+
+def test_only_the_brief_carries_the_sport_block():
+    """The fixture list belongs on the one message a day, not bolted onto
+    every future alert."""
+    from notify.alerts import load_all
+    carriers = [r.key for r in load_all() if r.sport_block]
+    assert carriers == ["daily-site-brief"], carriers

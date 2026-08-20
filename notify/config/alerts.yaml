@@ -6,8 +6,12 @@
 #
 # Add a rule here, not in code. `jobs/metabase_alerts.py` is generic.
 #
+# STATE, 20 Aug 2026: only `daily-site-brief` is enabled. Everything else is
+# shelved at Ajay's request until a message schedule is agreed. The disabled
+# rules are tested and ready — flipping `enabled: true` is all that's needed.
+#
 # Test any rule without sending:
-#     python jobs/metabase_alerts.py --rule <key> --dry-run
+#     python -m notify.brief --rule <key> --dry-run
 # ---------------------------------------------------------------------------
 
 defaults:
@@ -120,6 +124,7 @@ rules:
       ORDER BY ln.loc
     condition: always            # a brief, not an alert — always sends
     route: site
+    sport_block: true        # append today's live sport (see notify/sport.py)
     message: |
       *{site_display}*
 
@@ -137,7 +142,7 @@ rules:
 
   # -------------------------------------------------------------------------
   - key: labour-hours-over
-    enabled: true
+    enabled: false
     title: Labour hours over schedule
     schedule: "15 9 * * *"      # 09:15 daily, after the overnight Nory sync
     description: >
@@ -180,7 +185,7 @@ rules:
 
   # -------------------------------------------------------------------------
   - key: labour-hours-saved
-    enabled: true
+    enabled: false
     title: Came in under schedule — well done
     schedule: "15 9 * * *"
     description: >
@@ -252,7 +257,7 @@ rules:
 
   # -------------------------------------------------------------------------
   - key: nory-sales-not-syncing
-    enabled: true
+    enabled: false
     title: Nory sales feed is down for a site
     schedule: "30 9 * * *"
     description: >

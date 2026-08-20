@@ -49,7 +49,7 @@ import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from notify import db
+from notify import db, sport
 from notify.alerts import AlertConfigError, Rule, load_all, max_sites_per_run
 from notify.sites import registry, in_quiet_hours
 from notify.zenzap import ZenZapClient, ZenZapError
@@ -77,7 +77,19 @@ def _reminder_rows(rule: Rule, sites) -> list[dict]:
     return [{"location_id": s["lightspeed_location_id"]} for s in targets]
 
 
-def run_rule(rule: Rule, sites, zz, args) -> tuple[int, int]:
+def _sport_block(cache: dict) -> str:
+    """Today's fixtures, fetched at most once per run.
+
+    All five sites share FANZO venue 17079, so the list is identical
+    everywhere — fetching it per site would be four wasted round trips
+    against someone else's undocumented endpoint.
+    """
+    if "text" not in cache:
+        cache["text"] = sport.block()
+    return cache["text"]
+
+
+def run_rule(rule: Rule, sites, zz, args, sport_cache=None) -> tuple[int, int]:
     kind = "reminder" if rule.is_reminder else "alert"
     print(f"\n=== {rule.key} — {rule.title}  [{kind}] ===")
 
@@ -127,6 +139,11 @@ def run_rule(rule: Rule, sites, zz, args) -> tuple[int, int]:
             continue
 
         text = rule.render(row, site.name)
+
+        if rule.sport_block:
+            block = _sport_block(sport_cache if sport_cache is not None else {})
+            if block:
+                text = f"{text}\n\n{block}"
 
         if rule.route.startswith("group:"):
             group = rule.route.split(":", 1)[1]
@@ -227,8 +244,9 @@ def main() -> int:
     zz = None if args.dry_run else ZenZapClient()
 
     total_sent = total_failed = 0
+    sport_cache: dict = {}
     for rule in selected:
-        sent, failed = run_rule(rule, sites, zz, args)
+        sent, failed = run_rule(rule, sites, zz, args, sport_cache)
         total_sent += sent
         total_failed += failed
 

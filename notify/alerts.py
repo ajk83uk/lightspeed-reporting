@@ -48,6 +48,7 @@ class Rule:
     schedule: Optional[str] = None
     description: Optional[str] = None
     sites: Optional[list] = None      # reminders: limit to these site keys
+    sport_block: bool = False         # append today's live-sport fixtures
 
     @property
     def is_reminder(self) -> bool:
@@ -219,6 +220,7 @@ def load_rules(path: Path | str = ALERTS_PATH) -> list[Rule]:
             schedule=entry.get("schedule"),
             description=entry.get("description"),
             sites=entry.get("sites"),
+            sport_block=entry.get("sport_block", False),
         ))
 
     keys = [r.key for r in rules]

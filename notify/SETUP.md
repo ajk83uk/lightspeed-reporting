@@ -140,6 +140,43 @@ the closest one rather than starting from scratch.
 
 ---
 
+## The live-sport block
+
+The morning brief ends with today's fixtures and channels. It is on because
+`daily-site-brief` carries `sport_block: true` in `alerts.yaml`; delete that
+line and the brief goes back to numbers only.
+
+Both halves come from FANZO (`notify/sport.py`):
+
+| Call | Gives us |
+|---|---|
+| venue 17079 `widget-json` | which fixtures we're showing (~4 days ahead) |
+| each fixture's `bars-showing` page | which channel |
+
+They join on FANZO's numeric fixture id. Things worth knowing:
+
+- **All five sites share venue 17079**, so every site's brief gets the same
+  list. If sites ever get their own FANZO venues, add the ids and fetch per site.
+- **A fixture only appears if it's in FANZO.** If a game isn't on the Live
+  Sports tab of the website, it won't be in the message either. That's a
+  dashboard job, not a code one.
+- **Don't move the channel lookup to a TV-listings site.** It was built that
+  way first. Matching fixtures across two vendors means matching on team name,
+  the names disagree ("Bradford" vs "Bradford City"), and any rule that fixes
+  that also merges "Manchester United" with "Manchester City". Matching on
+  FANZO's own fixture id removes the problem instead of guarding against it —
+  and covers rugby, F1 and cricket, which football-only listings don't.
+- **It fails soft.** If either call breaks, the sport block is empty and the
+  brief sends as normal.
+
+Preview any day:
+
+```bash
+python -c "from notify import sport; print(sport.block())"
+```
+
+---
+
 ## Alerts — data-driven
 
 Everything below is `notify/config/alerts.yaml`.

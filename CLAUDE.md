@@ -67,6 +67,18 @@ a code change. Read `notify/README.md` before touching it — it documents the s
 cap, the idempotent `externalId`, the BST/GMT double-cron, and why the £ figure is
 derived from hours rather than Nory's `planned_col`.
 
+The brief also carries a **live-sport block** (`notify/sport.py`, switched on
+by `sport_block: true` on the `daily-site-brief` rule). Both halves come from
+FANZO: venue **17079** `widget-json` for *which fixtures we are showing* (the
+same feed behind the Live Sports tab on the website, shared by all five sites),
+then each fixture's own `bars-showing` page for *which channel*, joined on the
+numeric fixture id. Covers football, rugby, F1 and cricket. Do NOT swap the
+channel half for a TV-listings site: cross-vendor name matching collapses
+"Manchester United" and "Manchester City" onto one key. Both endpoints are
+undocumented, so the block fails soft — a dead source costs the fixtures, never
+the brief. Fixtures only appear if someone has added them in the FANZO
+dashboard; as of 20 Aug 2026 no European football was listed there.
+
 Messages go to real staff groups. Always `--dry-run` first.
 
 ## Conventions
