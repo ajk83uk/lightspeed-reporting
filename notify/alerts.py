@@ -49,6 +49,7 @@ class Rule:
     description: Optional[str] = None
     sites: Optional[list] = None      # reminders: limit to these site keys
     sport_block: bool = False         # append today's live-sport fixtures
+    weekend_shift: Optional[str] = None   # 'previous_friday' — see due_now
 
     @property
     def is_reminder(self) -> bool:
@@ -113,6 +114,9 @@ class Rule:
                 f"OR, which is rarely what is meant. Use one or the other."
             )
 
+        if self.weekend_shift:
+            return self._due_with_weekend_shift(now, hour, dom, month)
+
         if not field_matches(hour, now.hour):
             return False
         if not field_matches(month, now.month):
@@ -124,6 +128,47 @@ class Rule:
             return False
 
         return True
+
+    def _due_with_weekend_shift(self, now, hour, dom, month) -> bool:
+        """Monthly rules that must not land on a weekend.
+
+        `weekend_shift: previous_friday` means: fire on the configured day of
+        the month, unless that day is a Saturday or Sunday, in which case fire
+        on the Friday before it instead.
+
+        Cron cannot express this — "the 25th" and "a weekday" are separate
+        fields that cron ORs rather than ANDs. So the schedule keeps saying
+        25 (which is what the reminder is *about*, and what reads correctly in
+        the config) and this shifts the actual send.
+
+        Worth it because a payroll cut-off prompt is useless landing mid-shift
+        on a Saturday — 25 Oct 2026 is a Sunday, 25 Apr 2026 a Saturday.
+        """
+        from calendar import monthrange
+        from datetime import date, timedelta
+
+        if hour != "*" and now.hour != int(hour.split(",")[0]):
+            return False
+        if month != "*" and now.month not in {int(x) for x in month.split(",")}:
+            return False
+        try:
+            target_day = int(dom)
+        except ValueError:
+            raise AlertConfigError(
+                f"Rule '{self.key}': weekend_shift needs a single day-of-month "
+                f"in its schedule, got {dom!r}"
+            )
+
+        last = monthrange(now.year, now.month)[1]
+        target = date(now.year, now.month, min(target_day, last))
+
+        # Mon=0 .. Sat=5, Sun=6
+        if target.weekday() == 5:
+            target -= timedelta(days=1)          # Saturday -> Friday
+        elif target.weekday() == 6:
+            target -= timedelta(days=2)          # Sunday   -> Friday
+
+        return now.date() == target
 
     @property
     def is_brief(self) -> bool:
@@ -221,6 +266,7 @@ def load_rules(path: Path | str = ALERTS_PATH) -> list[Rule]:
             description=entry.get("description"),
             sites=entry.get("sites"),
             sport_block=entry.get("sport_block", False),
+            weekend_shift=entry.get("weekend_shift"),
         ))
 
     keys = [r.key for r in rules]
@@ -266,6 +312,7 @@ def load_reminders(path: Path | str = REMINDERS_PATH) -> list[Rule]:
             schedule=entry.get("schedule"),
             description=entry.get("description"),
             sites=entry.get("sites"),
+            weekend_shift=entry.get("weekend_shift"),
         ))
 
     keys = [r.key for r in out]

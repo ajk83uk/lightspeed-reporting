@@ -122,6 +122,38 @@ def run_rule(rule: Rule, sites, zz, args, sport_cache=None) -> tuple[int, int]:
     sent = failed = 0
     now = datetime.now(LONDON)
 
+    # A group route posts to ONE shared chat, so it must send once — not once
+    # per matching site. Reminders build a row per site, so without this a
+    # five-site reminder posted five identical messages to the same group.
+    # The externalId keys on the GROUP, so a re-run can't double-post either.
+    if rule.route.startswith("group:"):
+        group = rule.route.split(":", 1)[1]
+        topic = sites.group_topic(group)
+        if not topic:
+            print(f"  ✗ route '{rule.route}' — no such group in sites.yaml")
+            return 0, 1
+
+        text = rule.render(breaching[0], topic)
+        if rule.sport_block:
+            blk = _sport_block(sport_cache if sport_cache is not None else {})
+            if blk:
+                text = f"{text}\n\n{blk}"
+
+        ext_id = f"{rule.key}-{now:%Y%m%d}-{group}"[:61]
+        print(f"  (group route — one message, not {len(breaching)})")
+
+        if args.dry_run:
+            print(f"\n  --- would send once to group '{topic}' ---")
+            print("  " + text.replace("\n", "\n  "))
+            return 1, 0
+        try:
+            zz.send_message(text, topic_name=topic, external_id=ext_id)
+            print(f"  ✓ {topic}")
+            return 1, 0
+        except ZenZapError as exc:
+            print(f"  ✗ {topic}: {exc}")
+            return 0, 1
+
     for row in breaching:
         # location_id is the reliable key; site name is the fallback. Names
         # differ across sources ("Solihull" in Nory/bookings, "Tap Solihull"
@@ -144,28 +176,6 @@ def run_rule(rule: Rule, sites, zz, args, sport_cache=None) -> tuple[int, int]:
             block = _sport_block(sport_cache if sport_cache is not None else {})
             if block:
                 text = f"{text}\n\n{block}"
-
-        if rule.route.startswith("group:"):
-            group = rule.route.split(":", 1)[1]
-            topic = sites.group_topic(group)
-            if not topic:
-                print(f"  ✗ route '{rule.route}' — no such group in sites.yaml")
-                failed += 1
-                continue
-            ext_id = f"{rule.key}-{now:%Y%m%d}-{site.key}"[:61]
-            if args.dry_run:
-                print(f"\n  --- would send to group '{topic}' ---")
-                print("  " + text.replace("\n", "\n  "))
-                sent += 1
-                continue
-            try:
-                zz.send_message(text, topic_name=topic, external_id=ext_id)
-                print(f"  ✓ {site.name} -> {topic}")
-                sent += 1
-            except ZenZapError as exc:
-                print(f"  ✗ {site.name} -> {topic}: {exc}")
-                failed += 1
-            continue
 
         if rule.route == "none":
             print(f"\n  --- {site.name} (route: none, not sent) ---")

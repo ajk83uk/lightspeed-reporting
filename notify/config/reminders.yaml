@@ -15,19 +15,6 @@
 
 reminders:
 
-  # --- TEMPORARY: end-to-end pipeline test, 20 Aug 2026 ----------------------
-  # Proves the whole chain through Railway: config -> push -> deploy -> hourly
-  # cron -> ZenZap. DELETE THIS ONCE IT HAS ARRIVED.
-  - key: pipeline-test-20260820
-    enabled: true
-    title: TEST — pipeline check
-    schedule: "0 12 20 8 *"        # 12:00 on 20 Aug only, so it cannot repeat
-    sites: [tt-solihull]
-    route: site
-    message: |
-      *Test message — please ignore* 🔧
-      Checking an automated messaging setup. No action needed.
-
   # --- Bins: one site, night before collection -------------------------------
   - key: bournemouth-bins-thursday
     enabled: false                 # flip to true when you want it live
@@ -38,6 +25,18 @@ reminders:
     message: |
       *Bins out tonight* 🗑
       Collection is tomorrow morning. Please put the bins out before you lock up.
+
+  # --- Payroll cut-off, monthly, one shared group ---------------------------
+  # From Ajay's message-schedule sheet, 20 Aug 2026.
+  - key: payroll-monthly-25th
+    enabled: true
+    title: Payroll cut-off reminder
+    schedule: "0 15 25 * *"        # 25th of every month, 15:00
+    weekend_shift: previous_friday # ...but the Friday before, if the 25th is a weekend
+    route: group:announcements     # posts ONCE, to Group Announcements
+    message: |
+      Hi all, please ensure all new starter forms have been completed and any
+      payroll notes sent to payroll@tapandtandoor.co.uk. Thank you
 
   # --- Stock counts: every site, monthly -------------------------------------
   - key: crockery-count-monthly
@@ -104,6 +103,12 @@ reminders:
 #                tt-bournemouth  tt-southampton
 #              An unknown key is an error, not a silent no-op — a typo would
 #              otherwise mean the reminder just never arrives.
+#
+#   weekend_shift
+#              'previous_friday' — fire on the Friday before when the day of
+#              the month lands on a Sat/Sun. Needs a single day in `schedule`.
+#              Cron can't express this: it ORs day-of-month against day-of-week
+#              rather than ANDing them.
 #
 #   route      site               each targeted site's own chat
 #              group:south_coast  once, to the South Coast Sites group

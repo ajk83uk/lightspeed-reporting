@@ -461,13 +461,22 @@ def test_reminder_can_target_one_site():
     assert sites.by_location_id(rows[0]["location_id"]).key == "tt-bournemouth"
 
 
+# Everything Ajay has actually signed off. Adding a key here is the moment a
+# message becomes real, so it belongs in the same commit as the config change
+# — never loosened to make a red test go green.
+APPROVED_SENDERS = {
+    "daily-site-brief",        # 11:00 daily, all sites  (agreed 20 Aug 2026)
+    "payroll-monthly-25th",    # 25th 15:00, group       (schedule sheet, 20 Aug 2026)
+}
+
+
 def test_example_reminders_ship_disabled():
     """The examples in reminders.yaml are documentation. If they shipped
     enabled, five sites would get a cellar-clean prompt nobody asked for."""
     from notify.alerts import load_reminders
     for r in load_reminders():
-        if r.key.startswith("pipeline-test-"):
-            continue          # deliberate one-off, dated, deletes itself by date
+        if r.key in APPROVED_SENDERS:
+            continue          # deliberately live
         assert r.enabled is False, f"{r.key} is an example and must ship off"
 
 
@@ -601,24 +610,36 @@ def test_every_shipped_schedule_parses_and_fires_somewhere():
 
 # ------------------------------------------------------------- what is live
 
-def test_only_the_morning_brief_messages_anyone():
-    """Agreed 20 Aug 2026: one message a day, the morning brief, and nothing
-    else until a schedule is signed off.
-
-    This test is the guard. If someone enables a rule without that decision
-    being revisited, this fails rather than five sites quietly getting an
-    extra message every morning. Dated pipeline tests are exempt.
+def test_nothing_messages_anyone_without_sign_off():
+    """Agreed 20 Aug 2026: nothing goes to a staff group unless Ajay has
+    asked for it. This is the guard. If a rule is enabled without being added
+    to APPROVED_SENDERS in the same commit, this fails — rather than five
+    sites quietly picking up an extra message.
     """
     from notify.alerts import load_all
 
-    senders = [
+    senders = {
         r.key for r in load_all()
-        if r.enabled and r.route != "none" and not r.key.startswith("pipeline-test-")
-    ]
-    assert senders == ["daily-site-brief"], (
-        f"Expected only daily-site-brief to be live, found: {senders}. "
-        f"If this is deliberate, update this test in the same commit."
+        if r.enabled and r.route != "none"
+    }
+    unapproved = senders - APPROVED_SENDERS
+    assert not unapproved, (
+        f"These would message real staff groups but were never signed off: "
+        f"{sorted(unapproved)}. If deliberate, add them to APPROVED_SENDERS "
+        f"in this commit."
     )
+
+
+def test_only_one_message_a_day_is_a_daily_one():
+    """The daily cadence Ajay asked for is ONE message a day. The payroll
+    reminder is monthly, so it doesn't break that; a second daily rule would.
+    """
+    from notify.alerts import load_all
+
+    daily = [r.key for r in load_all()
+             if r.enabled and r.route != "none" and r.schedule
+             and r.schedule.split()[2:] == ["*", "*", "*"]]
+    assert daily == ["daily-site-brief"], daily
 
 
 # ------------------------------------------------------- live sport block
@@ -717,3 +738,135 @@ def test_only_the_brief_carries_the_sport_block():
     from notify.alerts import load_all
     carriers = [r.key for r in load_all() if r.sport_block]
     assert carriers == ["daily-site-brief"], carriers
+
+
+# --------------------------------------------------- group routing sends once
+
+def test_group_route_sends_one_message_not_one_per_site():
+    """A reminder builds one row per site. A group route posts to ONE shared
+    chat, so without collapsing them a five-site reminder put five identical
+    messages into Group Announcements — and the per-site externalIds meant
+    ZenZap wouldn't dedupe them either. Caught on the first group-routed
+    reminder (payroll, 20 Aug 2026)."""
+    from notify.alerts import load_all
+    from notify.sites import registry
+    import notify.brief as brief
+
+    rule = next(r for r in load_all() if r.key == "payroll-monthly-25th")
+    assert rule.route.startswith("group:")
+
+    sends = []
+
+    class FakeZZ:
+        def send_message(self, text, topic_name, external_id):
+            sends.append((topic_name, external_id))
+
+    class Args:
+        dry_run = False
+        ignore_quiet_hours = True
+
+    sent, failed = brief.run_rule(rule, registry(), FakeZZ(), Args(), {})
+
+    assert (sent, failed) == (1, 0)
+    assert len(sends) == 1, f"expected one message, got {len(sends)}: {sends}"
+    topic, ext = sends[0]
+    assert topic == "Group Announcements"
+    # keyed on the group, not a site, so a re-run cannot double-post
+    assert ext.endswith("-announcements")
+
+
+def test_payroll_reminder_matches_the_schedule_sheet():
+    """From Ajay's message-schedule sheet, 20 Aug 2026: 25th of every month,
+    15:00, Group Announcements."""
+    from notify.alerts import load_all
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    rule = next(r for r in load_all() if r.key == "payroll-monthly-25th")
+    assert rule.enabled
+    assert rule.schedule == "0 15 25 * *"
+    assert rule.route == "group:announcements"
+    assert "payroll@tapandtandoor.co.uk" in rule.message
+
+    L = ZoneInfo("Europe/London")
+    assert rule.due_now(datetime(2026, 8, 25, 15, 0, tzinfo=L))
+    assert rule.due_now(datetime(2026, 9, 25, 15, 0, tzinfo=L))   # every month
+    assert not rule.due_now(datetime(2026, 8, 24, 15, 0, tzinfo=L))
+    assert not rule.due_now(datetime(2026, 8, 25, 14, 0, tzinfo=L))
+
+
+def test_spent_one_off_test_reminder_is_gone():
+    """The 20 Aug pipeline test has fired and cannot recur — it was deleted
+    rather than left disabled, so --list stays readable."""
+    from notify.alerts import load_all
+    assert not [r for r in load_all() if r.key.startswith("pipeline-test-")]
+
+
+# ------------------------------------------- weekend shift on monthly rules
+
+def test_payroll_shifts_off_a_weekend_to_the_friday_before():
+    """Agreed 20 Aug 2026: the 25th, unless that's a Sat/Sun, in which case
+    the Friday before. A payroll prompt landing mid-service on a Saturday is
+    a prompt nobody acts on."""
+    from notify.alerts import load_all
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    L = ZoneInfo("Europe/London")
+    rule = next(r for r in load_all() if r.key == "payroll-monthly-25th")
+    assert rule.weekend_shift == "previous_friday"
+
+    def fires_on(year, month):
+        for day in range(20, 29):
+            if rule.due_now(datetime(year, month, day, 15, 0, tzinfo=L)):
+                return day
+        return None
+
+    assert fires_on(2026, 8) == 25      # Tue — normal
+    assert fires_on(2026, 9) == 25      # Fri — normal
+    assert fires_on(2026, 10) == 23     # 25th is a Sunday -> Fri 23rd
+    assert fires_on(2026, 4) == 24      # 25th is a Saturday -> Fri 24th
+    assert fires_on(2027, 1) == 25      # Mon — normal
+
+
+def test_weekend_shift_fires_exactly_once_a_month():
+    """The widened day handling must not fire on both the shifted day and
+    the original."""
+    from notify.alerts import load_all
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    L = ZoneInfo("Europe/London")
+    rule = next(r for r in load_all() if r.key == "payroll-monthly-25th")
+
+    for year in (2026, 2027):
+        for month in range(1, 13):
+            hits = [d for d in range(1, 29)
+                    if rule.due_now(datetime(year, month, d, 15, 0, tzinfo=L))]
+            assert len(hits) == 1, f"{year}-{month:02d} fired on {hits}"
+
+
+def test_weekend_shift_respects_the_hour():
+    from notify.alerts import load_all
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    L = ZoneInfo("Europe/London")
+    rule = next(r for r in load_all() if r.key == "payroll-monthly-25th")
+    assert rule.due_now(datetime(2026, 8, 25, 15, 0, tzinfo=L))
+    assert not rule.due_now(datetime(2026, 8, 25, 14, 0, tzinfo=L))
+    assert not rule.due_now(datetime(2026, 8, 25, 16, 0, tzinfo=L))
+
+
+def test_weekend_shift_refuses_an_ambiguous_day_field():
+    """It needs one day of the month to shift. A range would be meaningless."""
+    from notify.alerts import Rule, AlertConfigError
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    import pytest
+
+    r = Rule(key="x", title="x", enabled=True, sql=None, condition="always",
+             message="x", route="site", database=0, site_column="",
+             schedule="0 15 23-25 * *", weekend_shift="previous_friday")
+    with pytest.raises(AlertConfigError):
+        r.due_now(datetime(2026, 8, 24, 15, 0, tzinfo=ZoneInfo("Europe/London")))
