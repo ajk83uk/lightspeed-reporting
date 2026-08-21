@@ -59,7 +59,50 @@ def _verify(raw: bytes, headers) -> dict | None:
         return wh.verify(raw, svix_headers)
     except WebhookVerificationError as exc:
         log.warning("Signature verification failed: %s", exc)
+        _diagnose(raw, svix_headers)
         return None
+
+
+def _diagnose(raw: bytes, svix_headers: dict) -> None:
+    """Log why a signature was rejected. Fingerprints only -- never the secret.
+
+    Added 2026-08-21: every delivery started returning 401 'invalid signature'
+    while the secret fingerprint matched Svix and an in-container selftest
+    verified fine. This recomputes the HMAC by hand so we can see whether the
+    worker's secret, the raw body, or the timestamp is the thing that differs.
+    """
+    import base64
+    import hashlib
+    import hmac
+    import time
+
+    try:
+        secret = settings.storekit_webhook_secret
+        key_b64 = secret.split("_", 1)[1] if secret.startswith("whsec_") else secret
+        mid = svix_headers.get("svix-id", "")
+        ts = svix_headers.get("svix-timestamp", "")
+        got = svix_headers.get("svix-signature", "")
+        signed = f"{mid}.{ts}.".encode() + raw
+        mine = base64.b64encode(
+            hmac.new(base64.b64decode(key_b64), signed, hashlib.sha256).digest()
+        ).decode()
+        skew = int(time.time()) - int(ts) if ts.isdigit() else None
+        log.warning(
+            "DIAG secret_len=%d secret_sha=%s body_len=%d body_sha=%s "
+            "svix_id=%r ts=%s skew_s=%s computed=v1,%s received=%r match=%s",
+            len(secret),
+            hashlib.sha256(secret.encode()).hexdigest()[:12],
+            len(raw),
+            hashlib.sha256(raw).hexdigest()[:12],
+            mid,
+            ts,
+            skew,
+            mine,
+            got,
+            mine in got,
+        )
+    except Exception:  # noqa: BLE001 -- diagnostics must never break the response
+        log.exception("DIAG failed")
 
 
 @app.get("/health")
