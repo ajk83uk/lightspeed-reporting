@@ -174,7 +174,10 @@ class Settings:
     # verification is OFF (receiver returns 401) until the secret is set, so a
     # misconfigured deploy fails closed rather than ingesting unsigned traffic.
     # Get the secret from the StoreKit dashboard when you register the endpoint.
-    storekit_webhook_secret: str = os.getenv("STOREKIT_WEBHOOK_SECRET", "")
+    # .strip(): pasting into Railway's variable field can leave a trailing
+    # newline, which silently breaks HMAC verification -> every delivery 401s.
+    # Same trap that broke DATABASE_URL (see db.connect()).
+    storekit_webhook_secret: str = os.getenv("STOREKIT_WEBHOOK_SECRET", "").strip()
     # Set to "1" only for local testing to skip signature verification.
     storekit_skip_verify: bool = os.getenv("STOREKIT_SKIP_VERIFY", "") == "1"
 
