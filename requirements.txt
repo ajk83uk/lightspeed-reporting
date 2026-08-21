@@ -10,4 +10,7 @@ PyYAML>=6.0
 # StoreKit webhook receiver (separate always-on web service)
 flask>=3.0
 gunicorn>=21.0
-svix>=1.0
+# PINNED 2026-08-21: was `svix>=1.0`, so a rebuild silently pulled svix 2.0.0
+# mid-incident. Pin the major version -- signature verification is not
+# something we want changing underneath us on an unrelated redeploy.
+svix>=1.0,<2

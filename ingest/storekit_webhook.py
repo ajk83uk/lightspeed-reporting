@@ -60,7 +60,11 @@ def _verify(raw: bytes, headers) -> dict | None:
         wh = Webhook(settings.storekit_webhook_secret)
         return wh.verify(raw, svix_headers)
     except WebhookVerificationError as exc:
-        log.warning("Signature verification failed: %s", exc)
+        # print(), not log.warning(): under gunicorn, logging.basicConfig() is a
+        # no-op if the root logger is already configured, so app log lines get
+        # swallowed intermittently (cost us hours on 2026-08-21 -- absence of a
+        # log line looked like absence of a request). stdout always survives.
+        print(f"SKWH verification failed: {exc}", flush=True)
         _diagnose(raw, svix_headers)
         return None
 
@@ -89,22 +93,17 @@ def _diagnose(raw: bytes, svix_headers: dict) -> None:
             hmac.new(base64.b64decode(key_b64), signed, hashlib.sha256).digest()
         ).decode()
         skew = int(time.time()) - int(ts) if ts.isdigit() else None
-        log.warning(
-            "DIAG secret_len=%d secret_sha=%s body_len=%d body_sha=%s "
-            "svix_id=%r ts=%s skew_s=%s computed=v1,%s received=%r match=%s",
-            len(secret),
-            hashlib.sha256(secret.encode()).hexdigest()[:12],
-            len(raw),
-            hashlib.sha256(raw).hexdigest()[:12],
-            mid,
-            ts,
-            skew,
-            mine,
-            got,
-            mine in got,
+        print(
+            f"SKWH DIAG secret_len={len(secret)} "
+            f"secret_sha={hashlib.sha256(secret.encode()).hexdigest()[:12]} "
+            f"body_len={len(raw)} body_sha={hashlib.sha256(raw).hexdigest()[:12]} "
+            f"body_head={raw[:60]!r} "
+            f"svix_id={mid!r} ts={ts} skew_s={skew} "
+            f"computed=v1,{mine} received={got!r} match={mine in got}",
+            flush=True,
         )
-    except Exception:  # noqa: BLE001 -- diagnostics must never break the response
-        log.exception("DIAG failed")
+    except Exception as exc:  # noqa: BLE001 -- diagnostics must never break the response
+        print(f"SKWH DIAG failed: {type(exc).__name__}: {exc}", flush=True)
 
 
 @app.get("/health")
