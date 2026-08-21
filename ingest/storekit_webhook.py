@@ -14,8 +14,10 @@ does transport: verify -> route -> 2xx.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 
 from flask import Flask, request
 
@@ -107,7 +109,22 @@ def _diagnose(raw: bytes, svix_headers: dict) -> None:
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}, 200
+    """Health probe + build/secret identity.
+
+    Added 2026-08-21: public requests were returning 401 with no matching log
+    line, which is impossible for this build (every 401 path logs). This lets
+    the *serving* process identify which commit it is and which secret it
+    holds, so we can tell it apart from a stale container. Fingerprint only --
+    never the secret itself.
+    """
+    secret = settings.storekit_webhook_secret
+    return {
+        "status": "ok",
+        "commit": os.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:7],
+        "secret_len": len(secret),
+        "secret_sha": hashlib.sha256(secret.encode()).hexdigest()[:12] if secret else None,
+        "skip_verify": settings.storekit_skip_verify,
+    }, 200
 
 
 @app.post("/webhooks/storekit")
