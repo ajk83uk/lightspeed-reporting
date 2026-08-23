@@ -146,7 +146,7 @@ rules:
   - key: weekly-sports-bookings
     enabled: true
     title: Weekly sports bookings
-    schedule: "0 8 * * 1"          # Mondays 08:00 — prior full week, Mon-Sun
+    schedule: "0 10 * * 1"         # Mondays 10:00 — prior full week, Mon-Sun
     route: group:head_office       # NOT site staff: see description
     description: >
       Sky and TNT cost the group ~£118k a year. This is the only regular read

@@ -86,7 +86,9 @@ reminders:
 #   enabled    false parks it without deleting it
 #   title      shown in `--list` and in the Railway logs
 #   schedule   5-field cron in UK LOCAL time — follows the clocks by itself.
-#              The service runs hourly, so hour + day matter; minute is ignored.
+#              The service wakes every 15 min, so the minute must be one of
+#              00, 15, 30 or 45. Anything else is refused at load rather than
+#              silently never firing.
 #
 #                "0 21 * * 3"    Wednesdays 21:00
 #                "0 10 * * 1-5"  weekdays 10:00

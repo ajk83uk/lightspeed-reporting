@@ -18,6 +18,11 @@ import yaml
 ALERTS_PATH = Path(__file__).resolve().parent / "config" / "alerts.yaml"
 REMINDERS_PATH = Path(__file__).resolve().parent / "config" / "reminders.yaml"
 
+# The Railway service wakes on these minutes past the hour
+# (railway.brief.json: "*/15 * * * *"). A rule scheduled for any other minute
+# would simply never fire, so it is rejected at load rather than going quiet.
+SLOT_MINUTES = {0, 15, 30, 45}
+
 OPS = {
     ">": operator.gt,
     ">=": operator.ge,
@@ -86,7 +91,17 @@ class Rule:
                 f"Rule '{self.key}': schedule {self.schedule!r} must have 5 "
                 f"cron fields, e.g. '0 11 * * *'"
             )
-        _minute, hour, dom, month, dow = parts
+        minute, hour, dom, month, dow = parts
+
+        # Until 22 Aug 2026 the service ran hourly and the minute was ignored.
+        # It now wakes every 15 min so a rule can ask for 10:45.
+        for token in minute.replace("-", ",").split(","):
+            if token != "*" and int(token) not in SLOT_MINUTES:
+                raise AlertConfigError(
+                    f"Rule '{self.key}': schedule {self.schedule!r} wants minute "
+                    f"{token}, but the service only wakes at "
+                    f"{sorted(SLOT_MINUTES)} past the hour. It would never fire."
+                )
 
         def field_matches(field: str, value: int, wrap: int | None = None) -> bool:
             """True if `value` satisfies a cron field (*, n, a-b, or a list)."""
@@ -115,8 +130,11 @@ class Rule:
             )
 
         if self.weekend_shift:
-            return self._due_with_weekend_shift(now, hour, dom, month)
+            return (field_matches(minute, now.minute)
+                    and self._due_with_weekend_shift(now, hour, dom, month))
 
+        if not field_matches(minute, now.minute):
+            return False
         if not field_matches(hour, now.hour):
             return False
         if not field_matches(month, now.month):

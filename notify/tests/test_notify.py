@@ -601,7 +601,12 @@ def test_dom_and_dow_together_is_refused():
 
 def test_every_shipped_schedule_parses_and_fires_somewhere():
     """Every rule's schedule must be valid and actually reachable — a rule that
-    can never fire looks configured but silently does nothing."""
+    can never fire looks configured but silently does nothing.
+
+    Steps in 15-minute slots, matching how the service actually wakes
+    (railway.brief.json). Stepping in whole hours would only ever test
+    minute 0 and would miss a rule scheduled for :15, :30 or :45.
+    """
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
     from notify.alerts import load_all
@@ -612,8 +617,8 @@ def test_every_shipped_schedule_parses_and_fires_somewhere():
         if not rule.schedule:
             continue
         fires = any(
-            rule.due_now(start + timedelta(hours=h))
-            for h in range(24 * 400)          # 400 days covers monthly + annual
+            rule.due_now(start + timedelta(minutes=15 * i))
+            for i in range(4 * 24 * 400)      # 400 days covers monthly + annual
         )
         assert fires, f"{rule.key}: schedule {rule.schedule!r} never fires"
 
@@ -961,7 +966,7 @@ def test_sports_report_goes_to_head_office_not_to_sites():
     from notify.alerts import load_all
     rule = next(r for r in load_all() if r.key == "weekly-sports-bookings")
     assert rule.route == "group:head_office"
-    assert rule.schedule == "0 8 * * 1"          # Mondays 08:00
+    assert rule.schedule == "0 10 * * 1"         # Mondays 10:00
 
 
 def test_sports_report_carries_no_cost_per_cover():
@@ -996,3 +1001,33 @@ def test_sports_report_counts_ad_hoc_fixture_offers():
     assert "nations championship" in sql
     assert r"\mv\m" in sql            # the "X v Y" fixture form
     assert "is_cancelled" in sql      # cancelled bookings excluded
+
+
+def test_service_wakes_often_enough_for_every_schedule():
+    """railway.brief.json decides which minutes exist. A rule asking for a
+    minute the service never wakes on would look configured and never fire,
+    so loading it is an error rather than a silent no-op.
+
+    Changed 22 Aug 2026 from hourly to every 15 minutes, when a message was
+    wanted at 10:45. Before that the minute field was ignored entirely — the
+    labour rules said 09:15 and would have fired at 09:00.
+    """
+    import json
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from notify.alerts import load_all, SLOT_MINUTES, AlertConfigError, Rule
+    import pytest
+
+    cron = json.load(open("railway.brief.json"))["deploy"]["cronSchedule"]
+    assert cron == "*/15 * * * *", cron
+    assert SLOT_MINUTES == {0, 15, 30, 45}
+
+    for rule in load_all():
+        if rule.schedule:
+            assert int(rule.schedule.split()[0]) in SLOT_MINUTES, rule.key
+
+    bad = Rule(key="x", title="x", enabled=True, sql=None, condition="always",
+               message="x", route="site", database=0, site_column="",
+               schedule="7 10 * * 1")
+    with pytest.raises(AlertConfigError):
+        bad.due_now(datetime(2026, 8, 24, 10, 7, tzinfo=ZoneInfo("Europe/London")))

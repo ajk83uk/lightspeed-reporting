@@ -206,12 +206,14 @@ Everything below is `notify/config/alerts.yaml`.
 ## Timing — "at certain times"
 
 `schedule` is standard 5-field cron, evaluated in **UK local time**, so it
-follows the clocks by itself. The service runs hourly, so the **hour** and
-**day** are what matter; the minute is ignored.
+follows the clocks by itself. The service wakes **every 15 minutes**, so the
+minute must be `00`, `15`, `30` or `45` — any other value is refused when the
+config loads, rather than looking fine and never firing.
 
 | You want | `schedule:` |
 |---|---|
 | Every day at 11:00 | `0 11 * * *` |
+| Mondays at 10:45 | `45 10 * * 1` |
 | Every day at 16:00 | `0 16 * * *` |
 | Mondays at 09:00 | `0 9 * * 1` |
 | Weekdays at 08:00 | `0 8 * * 1-5` |
