@@ -870,3 +870,74 @@ def test_weekend_shift_refuses_an_ambiguous_day_field():
              schedule="0 15 23-25 * *", weekend_shift="previous_friday")
     with pytest.raises(AlertConfigError):
         r.due_now(datetime(2026, 8, 24, 15, 0, tzinfo=ZoneInfo("Europe/London")))
+
+
+# ------------------------------------- fixture times must not depend on host
+
+def _fake_feed(monkeypatch, payload):
+    class FakeResp:
+        def raise_for_status(self): pass
+        def json(self): return {"result": payload}
+    monkeypatch.setattr(sport.requests, "get", lambda *a, **k: FakeResp())
+
+
+def test_time_comes_from_utc_not_the_localised_field(monkeypatch):
+    """FANZO's `startTime` is rendered in the REQUESTER's timezone. Reading it
+    made the brief correct from a UK laptop and wrong from Railway's US hosts:
+    on 21 Aug 2026 five sites were told Arsenal v Coventry was at 15:00 when
+    it kicked off at 20:00.
+
+    The payload below is exactly that trap — `startTime` says 15:00, the UTC
+    field says 19:00Z, which is 20:00 in London. We must report 20:00.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    _fake_feed(monkeypatch, [{
+        "id": 767983, "name": "Arsenal vs Coventry",
+        "startTimeUtc": "2026-08-21T19:00:00+00:00",
+        "startTime": "2026-08-21 15:00:00",       # <- the poisoned field
+        "competition": {"name": "Premier League"},
+        "sport": {"name": "Football"}, "isBig": True, "matchpintUrl": None,
+    }])
+    on = datetime(2026, 8, 21, 9, 0, tzinfo=ZoneInfo("Europe/London"))
+    fixtures = sport.fanzo_fixtures(on=on)
+    assert [f["time"] for f in fixtures] == ["20:00"]
+
+
+def test_kick_offs_before_opening_are_dropped(monkeypatch):
+    """Sites open at midday. A 10:30 start is not theirs to put on, and
+    listing it just trains people to skim the section. Agreed 21 Aug 2026."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    _fake_feed(monkeypatch, [
+        {"id": 1, "name": "Early vs Riser",
+         "startTimeUtc": "2026-08-21T09:30:00+00:00",     # 10:30 London
+         "competition": {"name": "Test"}, "sport": {"name": "Football"},
+         "isBig": False, "matchpintUrl": None},
+        {"id": 2, "name": "Fine vs Time",
+         "startTimeUtc": "2026-08-21T10:00:00+00:00",     # 11:00 London
+         "competition": {"name": "Test"}, "sport": {"name": "Football"},
+         "isBig": False, "matchpintUrl": None},
+    ])
+    on = datetime(2026, 8, 21, 9, 0, tzinfo=ZoneInfo("Europe/London"))
+    names = [f["name"] for f in sport.fanzo_fixtures(on=on)]
+    assert names == ["Fine vs Time"]
+
+
+def test_day_boundary_is_london_not_utc(monkeypatch):
+    """A 23:30 BST kick-off is 22:30Z the same day, but a 00:30 BST one is
+    23:30Z the PREVIOUS day. Bucketing on the UTC date would file it wrong."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    _fake_feed(monkeypatch, [{
+        "id": 3, "name": "Late vs Night",
+        "startTimeUtc": "2026-08-21T22:30:00+00:00",       # 23:30 London, 21st
+        "competition": {"name": "Test"}, "sport": {"name": "Football"},
+        "isBig": False, "matchpintUrl": None,
+    }])
+    L = ZoneInfo("Europe/London")
+    assert len(sport.fanzo_fixtures(on=datetime(2026, 8, 21, 9, 0, tzinfo=L))) == 1
+    assert len(sport.fanzo_fixtures(on=datetime(2026, 8, 22, 9, 0, tzinfo=L))) == 0

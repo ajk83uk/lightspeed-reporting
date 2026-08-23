@@ -32,6 +32,13 @@ groups:
       Everyone. Reserved for genuine all-estate messages. No automation posts
       here by default — it's the fastest group to train people to mute.
 
+  head_office:
+    zenzap_topic: "Head Office"
+    note: >
+      Ajay + the central team, 5 members. NOT site staff — this is where
+      analysis and cost reporting goes, so it can be blunter than anything
+      sent to a site. TAPPY added 22 Aug 2026 for the weekly sports report.
+
   south_coast:
     zenzap_topic: "South Coast Sites"
     note: >

@@ -47,6 +47,7 @@ import requests
 
 LONDON = ZoneInfo("Europe/London")
 FANZO_VENUE = 17079
+EARLIEST_HOUR = 11        # sites open at midday; don't flag a 10:30 start
 FIXTURES_URL = "https://www-service.fanzo.com/venues/{venue}/fixture/widget-json"
 UA = {"User-Agent": "Tap-and-Tandoor-ops/1.0"}
 TIMEOUT = 20
@@ -56,19 +57,40 @@ _NEXT_DATA = re.compile(
 
 
 def fanzo_fixtures(venue: int = FANZO_VENUE, on: datetime | None = None) -> list[dict]:
-    """Fixtures this venue has chosen to show on `on` (default: today, UK)."""
-    day = (on or datetime.now(LONDON)).strftime("%Y-%m-%d")
+    """Fixtures this venue is showing on `on` (default: today, UK time).
+
+    Times come from `startTimeUtc`, converted here. Do NOT use the sibling
+    `startTime` field: FANZO renders that in the *requester's* timezone, so it
+    reads correctly from a UK machine and wrongly from a US-hosted one. That
+    shipped on 21 Aug 2026 — Railway runs in the US, and the brief told five
+    sites Arsenal v Coventry was at 15:00 when it was at 20:00.
+
+    Anything kicking off before EARLIEST_HOUR is dropped: the sites open at
+    midday, so a 10:30 start is not theirs to put on.
+    """
+    now = on or datetime.now(LONDON)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=LONDON)
+    day = now.astimezone(LONDON).date()
+
     r = requests.get(FIXTURES_URL.format(venue=venue), timeout=TIMEOUT, headers=UA)
     r.raise_for_status()
 
     out = []
     for f in (r.json() or {}).get("result", []):
-        start = f.get("startTime") or ""
-        if not start.startswith(day):
+        raw = f.get("startTimeUtc")
+        if not raw:
+            continue
+        try:
+            local = datetime.fromisoformat(
+                raw.replace("Z", "+00:00")).astimezone(LONDON)
+        except ValueError:
+            continue
+        if local.date() != day or local.hour < EARLIEST_HOUR:
             continue
         out.append({
             "id": f.get("id"),
-            "time": start[11:16],
+            "time": local.strftime("%H:%M"),
             "name": f.get("name", ""),
             "competition": (f.get("competition") or {}).get("name", ""),
             "sport": (f.get("sport") or {}).get("name", ""),

@@ -5,11 +5,12 @@
 # the UUID means renaming a group in the app cannot silently reroute
 # alerts to the wrong site. If you rename or recreate a group, re-run
 # this script and review the diff before committing.
-# Generated: 2026-08-19T17:10:13+00:00
+# Generated: 2026-08-19T17:10:13+00:00 (Head Office added 2026-08-22)
 
 topics:
   'Bournemouth': a8474997-c2a6-4f31-82bf-f8f7ecdf875f   # 8 members
   'Group Announcements': 3589a044-f799-486a-8977-724a08db8307   # 14 members
+  'Head Office': 66f2a865-df06-4c1e-906c-bfbb05110b9c   # 5 members
   'Peterborough': 906bd102-b540-48ce-87b2-8a92f51b301d   # 6 members
   'Portsmouth': 6685f897-441f-4edb-a632-6d7c528d2856   # 8 members
   'Solihull': 5ae2814a-a2cc-4e90-9f69-43513a093880   # 9 members
