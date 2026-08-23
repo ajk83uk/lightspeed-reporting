@@ -64,6 +64,7 @@ def test_config_loads_and_keys_are_unique():
     assert {r.key for r in rules} == {
         "daily-site-brief", "labour-hours-over", "labour-hours-saved",
         "labour-pct-over-target", "nory-sales-not-syncing",
+        "weekly-sports-bookings",
     }
 
 
@@ -227,8 +228,16 @@ def test_brief_resolves_by_location_id_not_name():
 
 
 def test_every_rule_routes_somewhere_valid():
+    """`group:<name>` is valid too — the group must exist in sites.yaml, which
+    test_group_routes_name_a_real_group checks separately."""
+    from notify.sites import registry
+    sites = registry()
     for rule in load_rules():
-        assert rule.route in {"site", "none"}, f"{rule.key}: bad route {rule.route}"
+        if rule.route.startswith("group:"):
+            name = rule.route.split(":", 1)[1]
+            assert sites.group_topic(name), f"{rule.key}: no group '{name}'"
+        else:
+            assert rule.route in {"site", "none"}, f"{rule.key}: bad route {rule.route}"
 
 
 def test_breaching_sites_all_resolve_to_real_sites(hours_rule):
@@ -467,6 +476,7 @@ def test_reminder_can_target_one_site():
 APPROVED_SENDERS = {
     "daily-site-brief",        # 11:00 daily, all sites  (agreed 20 Aug 2026)
     "payroll-monthly-25th",    # 25th 15:00, group       (schedule sheet, 20 Aug 2026)
+    "weekly-sports-bookings",  # Mon 08:00, head office  (agreed 22 Aug 2026)
 }
 
 
@@ -941,3 +951,48 @@ def test_day_boundary_is_london_not_utc(monkeypatch):
     L = ZoneInfo("Europe/London")
     assert len(sport.fanzo_fixtures(on=datetime(2026, 8, 21, 9, 0, tzinfo=L))) == 1
     assert len(sport.fanzo_fixtures(on=datetime(2026, 8, 22, 9, 0, tzinfo=L))) == 0
+
+
+# --------------------------------------------- weekly sports bookings report
+
+def test_sports_report_goes_to_head_office_not_to_sites():
+    """It's a cost question for the central team. The same numbers in a site
+    chat read as a scoreboard the GM can't do much about in the week."""
+    from notify.alerts import load_all
+    rule = next(r for r in load_all() if r.key == "weekly-sports-bookings")
+    assert rule.route == "group:head_office"
+    assert rule.schedule == "0 8 * * 1"          # Mondays 08:00
+
+
+def test_sports_report_carries_no_cost_per_cover():
+    """Decided 22 Aug 2026. A walk-in can't select an offer, so pre-booked
+    sports covers miss exactly the trade a football town generates — and
+    Peterborough's booking path was silently broken for eight weeks. Ranking
+    sites on cost per cover would have read as a verdict on GMs. It goes back
+    in when booking-level SPEND is attributable, not before.
+    """
+    from notify.alerts import load_all
+    rule = next(r for r in load_all() if r.key == "weekly-sports-bookings")
+    body = (rule.message + (rule.sql or "")).lower()
+    for banned in ("cost per cover", "£", "cost_per_cover"):
+        assert banned not in body, f"{banned!r} is back in the sports report"
+
+
+def test_sports_report_states_its_own_blind_spot():
+    """The walk-in caveat is the difference between a useful number and a
+    misleading one, so it ships in the message rather than in a doc."""
+    from notify.alerts import load_all
+    rule = next(r for r in load_all() if r.key == "weekly-sports-bookings")
+    assert "walk-in" in rule.message.lower()
+
+
+def test_sports_report_counts_ad_hoc_fixture_offers():
+    """Sites create an offer per fixture ('World Cup - Panama v England'),
+    not just 'Live Sports Booking'. Matching only the latter drops about a
+    fifth of sports bookings."""
+    from notify.alerts import load_all
+    sql = next(r for r in load_all() if r.key == "weekly-sports-bookings").sql.lower()
+    assert "world cup" in sql
+    assert "nations championship" in sql
+    assert r"\mv\m" in sql            # the "X v Y" fixture form
+    assert "is_cancelled" in sql      # cancelled bookings excluded

@@ -141,6 +141,88 @@ rules:
       Expect around {expect_total} — a normal one is {typical_total}{rota_note}
 
   # -------------------------------------------------------------------------
+
+  # --- Weekly sports bookings, head office only -----------------------------
+  - key: weekly-sports-bookings
+    enabled: true
+    title: Weekly sports bookings
+    schedule: "0 8 * * 1"          # Mondays 08:00 — prior full week, Mon-Sun
+    route: group:head_office       # NOT site staff: see description
+    description: >
+      Sky and TNT cost the group ~£118k a year. This is the only regular read
+      on what books against it. Head Office only, deliberately: it is a cost
+      question, not something site teams can act on in the week.
+
+      Bookings and covers ONLY. Cost per cover was specified in the original
+      brief and is deliberately absent, because the metric cannot support the
+      weight it would carry: a walk-in cannot select an offer, so pre-booked
+      sports covers are structurally blind to exactly the trade a football
+      town generates. Ranking sites on it would have read as a verdict on
+      GMs. Add it when booking-level SPEND is attributable, not before.
+
+      Counts any FavouriteTable offer naming sport, a World Cup, a Nations
+      Championship, or a fixture in "X v Y" form — sites create ad-hoc offers
+      per fixture, and matching only "Live Sports Booking" misses a fifth of
+      them. Cancelled bookings excluded.
+    sql: |
+      with bounds as (
+        select (date_trunc('week', current_date)::date - 7)  as wk_start,
+               (date_trunc('week', current_date)::date - 1)  as wk_end,
+               (date_trunc('week', current_date)::date - 14) as pr_start,
+               (date_trunc('week', current_date)::date - 8)  as pr_end
+      ),
+      sports as (
+        select vb.business_location_id, vb.site, vb.booking_date, vb.covers
+        from bookings b
+        join v_bookings vb using (booking_ref_no)
+        where coalesce(vb.is_cancelled, false) = false
+          and (b.raw->>'OfferName' ilike '%sport%'
+            or b.raw->>'OfferName' ilike '%world cup%'
+            or b.raw->>'OfferName' ilike '%nations championship%'
+            or b.raw->>'OfferName' ~* '\mv\M')
+      ),
+      per_site as (
+        select s.business_location_id, s.site,
+          count(*) filter (where s.booking_date between b.wk_start and b.wk_end) as bk,
+          coalesce(sum(s.covers) filter (where s.booking_date between b.wk_start and b.wk_end),0) as cv,
+          count(*) filter (where s.booking_date between b.pr_start and b.pr_end) as bk_pr,
+          coalesce(sum(s.covers) filter (where s.booking_date between b.pr_start and b.pr_end),0) as cv_pr
+        from sports s cross join bounds b
+        group by 1,2
+      )
+      select
+        to_char((select wk_start from bounds), 'DD Mon')   as wk_start,
+        to_char((select wk_end   from bounds), 'DD Mon')   as wk_end,
+        (select sum(bk) from per_site)                     as total_bookings,
+        (select sum(cv) from per_site)                     as total_covers,
+        (select case when sum(bk)-sum(bk_pr) > 0 then '+' else '' end
+                || (sum(bk)-sum(bk_pr))::text from per_site) as wow_bookings,
+        (select case when sum(cv)-sum(cv_pr) > 0 then '+' else '' end
+                || (sum(cv)-sum(cv_pr))::text from per_site) as wow_covers,
+        (select string_agg(
+           format('• %-14s %3s covers / %s bookings  %s',
+                  site, cv, bk,
+                  case when cv - cv_pr > 0 then '▲ ' || (cv - cv_pr)
+                       when cv - cv_pr < 0 then '▼ ' || abs(cv - cv_pr)
+                       else '—' end),
+           E'\n' order by cv desc, site)
+         from per_site)                                    as site_lines
+    condition: always
+    message: |
+      *SPORTS BOOKINGS — w/c {wk_start}*
+      {wk_start} to {wk_end}, pre-booked only
+
+      Estate: {total_bookings} bookings / {total_covers} covers
+      Week on week: {wow_bookings} bookings, {wow_covers} covers
+
+      {site_lines}
+
+      _Walk-in sport trade isn't captured — a walk-in can't select an offer,
+      so these are a floor, not the whole picture._
+      _Peterborough had no Live Sports booking option on the website until
+      22 Aug 2026, so its earlier weeks read zero for that reason. Remove
+      this note once a few clean weeks have passed._
+
   - key: labour-hours-over
     enabled: false
     title: Labour hours over schedule
