@@ -223,6 +223,62 @@ rules:
       22 Aug 2026, so its earlier weeks read zero for that reason. Remove
       this note once a few clean weeks have passed._
 
+
+  # --- Portsmouth: per-server APC, for Alice --------------------------------
+  - key: portsmouth-server-apc
+    enabled: true
+    title: Portsmouth server APC (for Alice)
+    schedule: "0 11 * * *"         # daily 11:00, alongside the site brief
+    route: site                    # the SQL returns Portsmouth only
+    description: >
+      Requested 25 Aug 2026: last night's dine-in spend per head, per server,
+      addressed to Alice. Portsmouth only — the query is hard-filtered to
+      business_location_id 1718940401139718, so `route: site` sends the one
+      row to the Portsmouth chat and nowhere else.
+
+      Covers only people who RANG dine-in covers, so it is not the rota:
+      kitchen, bar and anyone who didn't open a table won't appear. Ordered
+      by APC, not covers, because the point is spend per head.
+
+      `hours` on v_staff_scorecard_day is deliberately NOT used — it reads
+      17.5 for a single evening shift, so it is measuring something other
+      than time worked and would undermine trust in the rest of the message.
+    sql: |
+      with d as (
+        select max(business_date) as bd
+        from v_staff_scorecard_day
+        where business_location_id = 1718940401139718
+      ),
+      staff as (
+        select s.staff, s.covers,
+               round(s.sales_exvat / nullif(s.covers, 0), 2) as apc
+        from v_staff_scorecard_day s, d
+        where s.business_location_id = 1718940401139718
+          and s.business_date = d.bd
+          and s.covers > 0
+      )
+      select
+        '1718940401139718'                              as location_id,
+        (select bd from d)                              as business_date,
+        (select count(*) from staff)                    as n_staff,
+        (select sum(covers) from staff)                 as site_covers,
+        (select string_agg(
+           format('%-12s %3s covers   £%s per head', staff, covers, apc),
+           E'\n' order by apc desc)
+         from staff)                                    as staff_lines,
+        (select staff from staff order by apc desc limit 1)      as top_staff,
+        (select to_char(apc, 'FM999990.00') from staff order by apc desc limit 1) as top_apc
+    condition: always
+    message: |
+      Morning Alice — Portsmouth servers last night ({business_date:date})
+
+      {staff_lines}
+
+      {n_staff} servers, {site_covers} dine-in covers.
+      Best per head: {top_staff} at £{top_apc}.
+
+      _Dine-in covers only — anyone who didn't open a table won't show here._
+
   - key: labour-hours-over
     enabled: false
     title: Labour hours over schedule

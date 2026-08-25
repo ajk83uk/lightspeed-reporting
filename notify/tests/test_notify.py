@@ -64,7 +64,7 @@ def test_config_loads_and_keys_are_unique():
     assert {r.key for r in rules} == {
         "daily-site-brief", "labour-hours-over", "labour-hours-saved",
         "labour-pct-over-target", "nory-sales-not-syncing",
-        "weekly-sports-bookings",
+        "weekly-sports-bookings", "portsmouth-server-apc",
     }
 
 
@@ -476,7 +476,8 @@ def test_reminder_can_target_one_site():
 APPROVED_SENDERS = {
     "daily-site-brief",        # 11:00 daily, all sites  (agreed 20 Aug 2026)
     "payroll-monthly-25th",    # 25th 15:00, group       (schedule sheet, 20 Aug 2026)
-    "weekly-sports-bookings",  # Mon 08:00, head office  (agreed 22 Aug 2026)
+    "weekly-sports-bookings",  # Mon 10:00, head office  (agreed 22 Aug 2026)
+    "portsmouth-server-apc",   # daily 11:00, Portsmouth (requested 25 Aug 2026)
 }
 
 
@@ -645,16 +646,18 @@ def test_nothing_messages_anyone_without_sign_off():
     )
 
 
-def test_only_one_message_a_day_is_a_daily_one():
-    """The daily cadence Ajay asked for is ONE message a day. The payroll
-    reminder is monthly, so it doesn't break that; a second daily rule would.
+def test_daily_rules_are_only_the_ones_asked_for():
+    """Started as 'one message a day'. Portsmouth was deliberately given a
+    second on 25 Aug 2026 (per-server APC for Alice). Anything else appearing
+    here means a daily message crept in without being asked for — which is
+    how five sites end up muting the lot.
     """
     from notify.alerts import load_all
 
     daily = [r.key for r in load_all()
              if r.enabled and r.route != "none" and r.schedule
              and r.schedule.split()[2:] == ["*", "*", "*"]]
-    assert daily == ["daily-site-brief"], daily
+    assert set(daily) == {"daily-site-brief", "portsmouth-server-apc"}, daily
 
 
 # ------------------------------------------------------- live sport block
@@ -1031,3 +1034,55 @@ def test_service_wakes_often_enough_for_every_schedule():
                schedule="7 10 * * 1")
     with pytest.raises(AlertConfigError):
         bad.due_now(datetime(2026, 8, 24, 10, 7, tzinfo=ZoneInfo("Europe/London")))
+
+
+# ------------------------------------------ Portsmouth per-server APC, daily
+
+def test_portsmouth_apc_reaches_only_portsmouth():
+    """It names individuals. The query is hard-filtered to Portsmouth's
+    location id so `route: site` can only ever resolve to that one chat —
+    a config slip must not fan per-person figures out to five sites."""
+    from notify.alerts import load_all
+    rule = next(r for r in load_all() if r.key == "portsmouth-server-apc")
+    assert rule.route == "site"
+    assert "1718940401139718" in rule.sql
+    for other in ("1718940401139714", "1718940401139717",
+                  "1718940401139719", "1718940401139720"):
+        assert other not in rule.sql, f"{other} leaked into the Portsmouth query"
+
+
+def test_portsmouth_apc_returns_exactly_one_row():
+    """One row, one message. If the query ever returned a row per site this
+    would post individuals' figures into every site chat.
+
+    Skipped without DATABASE_URL — the rest of the suite must stay runnable
+    offline and in the Railway build, which has no database.
+    """
+    import os
+    import pytest
+    if not os.environ.get("DATABASE_URL"):
+        pytest.skip("no DATABASE_URL — live query test")
+    from notify.alerts import load_all
+    from notify import db
+    rule = next(r for r in load_all() if r.key == "portsmouth-server-apc")
+    rows = db.query(rule.sql)
+    assert len(rows) == 1
+    assert str(rows[0]["location_id"]) == "1718940401139718"
+
+
+def test_portsmouth_apc_does_not_report_hours():
+    """v_staff_scorecard_day.hours reads ~17.5 for one evening shift, so it
+    isn't hours worked. Publishing it next to real numbers would discredit
+    the whole message."""
+    from notify.alerts import load_all
+    rule = next(r for r in load_all() if r.key == "portsmouth-server-apc")
+    assert "hours" not in rule.message.lower()
+
+
+def test_portsmouth_apc_states_it_is_not_the_rota():
+    """Only people who rang dine-in covers appear. Without saying so, an
+    absent name reads as 'did nothing' rather than 'worked the bar'."""
+    from notify.alerts import load_all
+    rule = next(r for r in load_all() if r.key == "portsmouth-server-apc")
+    assert "dine-in covers only" in rule.message.lower()
+    assert "alice" in rule.message.lower()
