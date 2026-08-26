@@ -22,6 +22,22 @@ REMINDERS_PATH = Path(__file__).resolve().parent / "config" / "reminders.yaml"
 # (railway.brief.json: "*/15 * * * *"). A rule scheduled for any other minute
 # would simply never fire, so it is rejected at load rather than going quiet.
 SLOT_MINUTES = {0, 15, 30, 45}
+SLOT_LENGTH = 15
+
+
+def _slot(minute: int) -> int:
+    """Which 15-minute slot a clock minute belongs to.
+
+    Railway "does not guarantee execution times to the minute as they can vary
+    by a few minutes" (their docs), and the container takes time to start on
+    top of that. So a job triggered for 11:00 commonly runs at 11:01-11:03.
+
+    Matching the minute EXACTLY meant such a run found nothing due and exited
+    reporting success — which is what silently killed the 11:00 brief on
+    26 Aug 2026. Comparing slots instead tolerates the drift while still
+    letting a rule ask for :15, :30 or :45.
+    """
+    return (minute // SLOT_LENGTH) * SLOT_LENGTH
 
 OPS = {
     ">": operator.gt,
@@ -129,11 +145,17 @@ class Rule:
                 f"OR, which is rarely what is meant. Use one or the other."
             )
 
-        if self.weekend_shift:
-            return (field_matches(minute, now.minute)
-                    and self._due_with_weekend_shift(now, hour, dom, month))
+        def minute_matches() -> bool:
+            if minute == "*":
+                return True
+            return any(_slot(int(tok)) == _slot(now.minute)
+                       for tok in minute.replace("-", ",").split(","))
 
-        if not field_matches(minute, now.minute):
+        if self.weekend_shift:
+            return minute_matches() and self._due_with_weekend_shift(
+                now, hour, dom, month)
+
+        if not minute_matches():
             return False
         if not field_matches(hour, now.hour):
             return False

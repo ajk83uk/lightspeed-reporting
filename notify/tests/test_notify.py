@@ -1115,3 +1115,58 @@ def test_only_one_rota_prompt_exists():
     from notify.alerts import load_all
     rota = [r.key for r in load_all() if "rota" in r.key]
     assert rota == ["wednesday-rota-prompt"], rota
+
+
+# ------------------------------------- tolerate Railway's imprecise firing
+
+def test_a_late_run_still_fires_its_rules():
+    """Railway: "does not guarantee execution times to the minute as they can
+    vary by a few minutes", and container start adds more. On 26 Aug 2026 an
+    exact-minute match meant an 11:0x run found nothing due, exited 0, and the
+    morning brief silently never went to any site.
+
+    Anything inside the rule's 15-minute slot must still fire.
+    """
+    from notify.alerts import load_all
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    L = ZoneInfo("Europe/London")
+    brief = next(r for r in load_all() if r.key == "daily-site-brief")
+
+    for late in range(0, 15):                      # 11:00 .. 11:14
+        assert brief.due_now(datetime(2026, 8, 26, 11, late, tzinfo=L)), late
+    for other in (15, 16, 30, 45, 59):             # a later slot is NOT ours
+        assert not brief.due_now(datetime(2026, 8, 26, 11, other, tzinfo=L)), other
+
+
+def test_each_rule_fires_in_exactly_one_slot_per_occasion():
+    """Slot matching must not make a rule fire in two slots — with four runs
+    an hour that would be four messages, and only the idempotency key would
+    be stopping them."""
+    from notify.alerts import load_all
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    L = ZoneInfo("Europe/London")
+    for rule in load_all():
+        if not rule.schedule:
+            continue
+        hits = {m for m in range(0, 60, 15)
+                if rule.due_now(datetime(2026, 8, 26, 11, m, tzinfo=L))}
+        assert len(hits) <= 1, f"{rule.key} fires in slots {sorted(hits)}"
+
+
+def test_a_quarter_past_rule_is_not_caught_by_the_hour_run():
+    """The labour rules ask for 09:15. A 09:00 run must not sweep them up —
+    that was the pre-22-Aug behaviour, when the minute was ignored."""
+    from notify.alerts import load_rules
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    L = ZoneInfo("Europe/London")
+    r = next(x for x in load_rules() if x.key == "labour-hours-over")
+    assert r.schedule.startswith("15 9")
+    assert not r.due_now(datetime(2026, 8, 26, 9, 0, tzinfo=L))
+    assert r.due_now(datetime(2026, 8, 26, 9, 15, tzinfo=L))
+    assert r.due_now(datetime(2026, 8, 26, 9, 19, tzinfo=L))   # late run
