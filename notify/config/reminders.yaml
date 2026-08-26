@@ -58,15 +58,16 @@ reminders:
       *Glassware count due*
       Full count this week please. Note anything running low or heavily chipped.
 
-  # --- Weekly operational prompt, every site ---------------------------------
+  # --- Rota deadline, Wednesdays, one shared group -------------------------
+  # Requested 25 Aug 2026. Replaces the earlier per-site 10:00 example.
   - key: wednesday-rota-prompt
-    enabled: false
-    title: Start next week's rota
-    schedule: "0 10 * * 3"         # Wednesdays 10:00
-    route: site
+    enabled: true
+    title: Build next week's rota
+    schedule: "0 14 * * 3"         # Wednesdays 14:00
+    route: group:announcements     # posts ONCE, to Group Announcements
     message: |
-      *Rota reminder*
-      Please start planning next week's rota today so it's ready for sign-off.
+      Hi all, please can you build your rotas for the following week and
+      submit for approval. Thanks
 
   # --- A shared group rather than per-site -----------------------------------
   - key: south-coast-managers-meeting

@@ -478,6 +478,7 @@ APPROVED_SENDERS = {
     "payroll-monthly-25th",    # 25th 15:00, group       (schedule sheet, 20 Aug 2026)
     "weekly-sports-bookings",  # Mon 10:00, head office  (agreed 22 Aug 2026)
     "portsmouth-server-apc",   # daily 11:00, Portsmouth (requested 25 Aug 2026)
+    "wednesday-rota-prompt",   # Wed 14:00, group        (requested 25 Aug 2026)
 }
 
 
@@ -1086,3 +1087,31 @@ def test_portsmouth_apc_states_it_is_not_the_rota():
     rule = next(r for r in load_all() if r.key == "portsmouth-server-apc")
     assert "dine-in covers only" in rule.message.lower()
     assert "alice" in rule.message.lower()
+
+
+def test_rota_prompt_is_wednesday_2pm_to_the_group():
+    """Requested 25 Aug 2026. Posts once to Group Announcements, not five
+    times to five site chats — see test_group_route_sends_one_message."""
+    from notify.alerts import load_all
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    L = ZoneInfo("Europe/London")
+    rule = next(r for r in load_all() if r.key == "wednesday-rota-prompt")
+    assert rule.enabled
+    assert rule.route == "group:announcements"
+    assert rule.schedule == "0 14 * * 3"
+    assert "submit for approval" in rule.message
+
+    assert rule.due_now(datetime(2026, 8, 26, 14, 0, tzinfo=L))      # Wednesday
+    assert not rule.due_now(datetime(2026, 8, 27, 14, 0, tzinfo=L))  # Thursday
+    assert not rule.due_now(datetime(2026, 8, 26, 15, 0, tzinfo=L))  # wrong hour
+
+
+def test_only_one_rota_prompt_exists():
+    """A disabled per-site version used to sit alongside this one. Two rules
+    with the same intent are one careless `enabled: true` away from sending
+    the same instruction twice."""
+    from notify.alerts import load_all
+    rota = [r.key for r in load_all() if "rota" in r.key]
+    assert rota == ["wednesday-rota-prompt"], rota
