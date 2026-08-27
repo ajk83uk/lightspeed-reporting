@@ -65,6 +65,7 @@ def test_config_loads_and_keys_are_unique():
         "daily-site-brief", "labour-hours-over", "labour-hours-saved",
         "labour-pct-over-target", "nory-sales-not-syncing",
         "weekly-sports-bookings", "portsmouth-server-apc",
+        "ft-vs-ls-covers",
     }
 
 
@@ -479,6 +480,7 @@ APPROVED_SENDERS = {
     "weekly-sports-bookings",  # Mon 10:00, head office  (agreed 22 Aug 2026)
     "portsmouth-server-apc",   # daily 11:00, Portsmouth (requested 25 Aug 2026)
     "wednesday-rota-prompt",   # Wed 14:00, group        (requested 25 Aug 2026)
+    "ft-vs-ls-covers",         # daily 11:00, all sites  (requested 26 Aug 2026)
 }
 
 
@@ -658,7 +660,8 @@ def test_daily_rules_are_only_the_ones_asked_for():
     daily = [r.key for r in load_all()
              if r.enabled and r.route != "none" and r.schedule
              and r.schedule.split()[2:] == ["*", "*", "*"]]
-    assert set(daily) == {"daily-site-brief", "portsmouth-server-apc"}, daily
+    assert set(daily) == {"daily-site-brief", "portsmouth-server-apc",
+                          "ft-vs-ls-covers"}, daily
 
 
 # ------------------------------------------------------- live sport block
@@ -1170,3 +1173,52 @@ def test_a_quarter_past_rule_is_not_caught_by_the_hour_run():
     assert not r.due_now(datetime(2026, 8, 26, 9, 0, tzinfo=L))
     assert r.due_now(datetime(2026, 8, 26, 9, 15, tzinfo=L))
     assert r.due_now(datetime(2026, 8, 26, 9, 19, tzinfo=L))   # late run
+
+
+# ------------------------------------------------ FT vs LS covers reconciliation
+
+def test_ft_ls_covers_uses_cleaned_lightspeed_covers():
+    """Darts and shuffleboard checks carry cover counts and would inflate
+    Bournemouth's LS side every night, manufacturing a gap that isn't real.
+    The brief already reports on the cleaned basis; this must match it."""
+    from notify.alerts import load_all
+    sql = next(r for r in load_all() if r.key == "ft-vs-ls-covers").sql
+    assert "v_covers_clean" in sql
+    assert "is_dining_check" in sql
+
+
+def test_ft_ls_covers_excludes_the_darts_venue():
+    """The Bournemouth Darts FT venue takes bookings but has no till, so it
+    would report a permanent 'FT is higher' nobody can act on."""
+    from notify.alerts import load_all
+    from notify import db
+    import os, pytest
+    if not os.environ.get("DATABASE_URL"):
+        pytest.skip("no DATABASE_URL — live query test")
+    rule = next(r for r in load_all() if r.key == "ft-vs-ls-covers")
+    rows = db.query(rule.sql)
+    assert len(rows) == 5, [r["site_name"] for r in rows]
+    assert not any("dart" in str(r["site_name"]).lower() for r in rows)
+
+
+def test_ft_ls_covers_direction_wording_is_unambiguous():
+    """'Difference: 17' alone doesn't say which way. Ajay asked specifically
+    for it to state whether LS or FT is higher."""
+    from notify.alerts import load_all
+    rule = next(r for r in load_all() if r.key == "ft-vs-ls-covers")
+    assert "{direction}" in rule.message
+    for phrase in ("LS is higher", "FT is higher", "they match"):
+        assert phrase in rule.sql
+
+
+def test_ft_ls_gap_is_never_negative():
+    """`gap` is an absolute value paired with a direction word — a negative
+    number next to 'LS is higher' would read as a bug."""
+    from notify.alerts import load_all
+    from notify import db
+    import os, pytest
+    if not os.environ.get("DATABASE_URL"):
+        pytest.skip("no DATABASE_URL — live query test")
+    rule = next(r for r in load_all() if r.key == "ft-vs-ls-covers")
+    for r in db.query(rule.sql):
+        assert r["gap"] >= 0, r

@@ -279,6 +279,69 @@ rules:
 
       _Dine-in covers only — anyone who didn't open a table won't show here._
 
+
+  # --- FT vs LS covers reconciliation, per site -----------------------------
+  - key: ft-vs-ls-covers
+    enabled: true
+    title: FT vs LS covers
+    schedule: "0 11 * * *"         # daily 11:00, with the brief
+    route: site
+    description: >
+      Requested 26 Aug 2026. FavouriteTable and Lightspeed should show
+      roughly the same covers for a night; a persistent gap means either
+      bookings weren't marked as arrived in FT, or covers weren't keyed on
+      the till. Both make every cover-based figure we report less reliable.
+
+      FT side is `shown_covers`, which ALREADY includes walk-ins (FT logs
+      them as sale_channel_code 5), so the two are genuinely comparable —
+      this is not just measuring walk-in trade.
+
+      LS side is cleaned, not raw: darts and shuffleboard checks carry cover
+      counts and would otherwise inflate Bournemouth every night. Cleaning
+      removes roughly 2-11 covers a day and the gap mostly survives it, so
+      what's left is a real discrepancy rather than an artefact.
+
+      The Bournemouth Darts FT venue is deliberately excluded — it has FT
+      bookings but no till of its own, so it would report a permanent
+      "FT is higher" that nobody can act on.
+    sql: |
+      with ls as (
+        select business_location_id, biz_date,
+               sum(nb_covers) filter (where is_dining_check) as ls_covers
+        from v_covers_clean
+        where biz_date = current_date - 1
+        group by 1,2
+      )
+      select u.business_location_id::text          as location_id,
+             u.site                                as site_name,
+             u.biz_date                            as business_date,
+             coalesce(u.shown_covers, 0)           as ft_covers,
+             coalesce(ls.ls_covers, 0)             as ls_covers,
+             abs(coalesce(ls.ls_covers,0) - coalesce(u.shown_covers,0)) as gap,
+             case
+               when coalesce(ls.ls_covers,0) = coalesce(u.shown_covers,0) then 'they match'
+               when coalesce(ls.ls_covers,0) >  coalesce(u.shown_covers,0) then 'LS is higher'
+               else 'FT is higher'
+             end                                   as direction
+      from v_unified_site_day u
+      left join ls on ls.business_location_id = u.business_location_id
+                  and ls.biz_date = u.biz_date
+      where u.biz_date = current_date - 1
+        and u.business_location_id in (1718940401139714, 1718940401139717,
+                                       1718940401139718, 1718940401139719,
+                                       1718940401139720)
+    condition: always
+    message: |
+      *FT vs LS COVERS — {business_date:date}*
+
+      FT: {ft_covers}
+      LS: {ls_covers}
+      Difference: {gap} — {direction}
+
+      _These should track closely. A gap usually means bookings weren't
+      marked as arrived in FavouriteTable, or covers weren't put in on the
+      till._
+
   - key: labour-hours-over
     enabled: false
     title: Labour hours over schedule
