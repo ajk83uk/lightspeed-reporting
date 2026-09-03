@@ -109,13 +109,21 @@ INSERT INTO category_rules (dimension, category, match_type, match_value, priori
 -- NEW CONVENTION from Aug 2026: one rolling 'monthly specials' category matched
 -- by SKU (exact product codes). v_staff_day counts item_category='monthly
 -- specials' for business_date >= 2026-08-01 and the frozen legacy list (loaded
--- chips/croquettes/railway) before that, so history never shifts. To rotate the
--- special: swap the SKU rows below (keep old months' NAMED categories above for
--- pre-Aug history).
+-- chips/croquettes/railway) before that, so history never shifts.
+--
+-- To rotate the special: APPEND the new SKU row(s) below -- do NOT remove the
+-- previous month's. item_category is computed live in v_report_lines, so
+-- deleting an old SKU would retroactively un-tag that month and wipe it from
+-- the specials track record (card 170). Only one special sells in any given
+-- month (the previous one comes off the menu), so the aggregate never
+-- double-counts. Sanity-check before appending: confirm last month's SKUs have
+-- stopped selling.
 --   Aug 2026: Chicken Biriyani (3641), Paneer Biriyani (3646)
+--   Sep 2026: Grilled Seabass with chips (3759)
 INSERT INTO category_rules (dimension, category, match_type, match_value, priority) VALUES
     ('item_category', 'monthly specials', 'sku', '3641', 30),
-    ('item_category', 'monthly specials', 'sku', '3646', 30);
+    ('item_category', 'monthly specials', 'sku', '3646', 30),
+    ('item_category', 'monthly specials', 'sku', '3759', 30);
 
 -- LUNCH MENU. The lunch menu is two bowl options — "Curry Bowl" and "Salad Bowl"
 -- — each a normal priced base item with the choice (curry/salad) sitting on a
