@@ -69,6 +69,31 @@ reminders:
       Hi all, please can you build your rotas for the following week and
       submit for approval. Thanks
 
+  # --- Southampton: dishwasher / water softener, weekly ---------------------
+  # Requested 3 Sep 2026. Southampton only — theirs is the manual softener.
+  - key: southampton-dishwasher-weekly
+    enabled: true
+    title: Dishwasher deep clean & water softener salt
+    schedule: "0 15 * * 3"         # Wednesdays 15:00
+    sites: [tt-southampton]
+    route: site
+    message: |
+      *PLEASE COMPLETE TODAY*
+
+      *Weekly dishwasher deep clean & water softener top-up*
+
+      1. *Top up the salt* in the manual water softener linked to the
+         dishwasher. How to do it: https://www.youtube.com/watch?v=R14BBEIacCA
+      2. *Check the salt stock* while you are there. If it is running low,
+         tell a manager TODAY so it can be re-ordered.
+      3. *Deep clean inside the machine* — take the wash arms apart, clear
+         any limescale from the arms, jets and inside the dishwasher.
+      4. *Send a photo of the inside of the machine* into this chat once
+         it is done.
+
+      This is vital to keep the machine working at its best and keep
+      limescale away. Thank you.
+
   # --- A shared group rather than per-site -----------------------------------
   - key: south-coast-managers-meeting
     enabled: false
