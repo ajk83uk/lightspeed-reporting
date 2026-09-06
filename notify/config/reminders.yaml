@@ -65,6 +65,7 @@ reminders:
     title: Build next week's rota
     schedule: "0 14 * * 3"         # Wednesdays 14:00
     route: group:announcements     # posts ONCE, to Group Announcements
+    week_ahead: true               # append next week's key fixtures
     message: |
       Hi all, please can you build your rotas for the following week and
       submit for approval. Thanks
@@ -93,6 +94,26 @@ reminders:
 
       This is vital to keep the machine working at its best and keep
       limescale away. Thank you.
+
+  # --- Sunday lunch pre-orders, all sites, Saturday afternoon ---------------
+  # Requested 6 Sep 2026. Managers check pre-orders and brief the kitchen the
+  # day before, not on the morning.
+  - key: sunday-preorders-saturday
+    enabled: true
+    title: Sunday lunch pre-order check
+    schedule: "0 14 * * 6"         # Saturdays 14:00
+    sites: [tt-solihull, tt-southampton, tt-portsmouth,
+            tt-bournemouth, tt-peterborough]
+    route: site
+    message: |
+      *Sunday lunch pre-orders*
+
+      1. *Go through tomorrow's sunday lunch bookings*
+      2. *Check the guests have given their choices.* If any are missing,
+         chase the guest ASAP.
+      3. *Give the kitchen the numbers and the choices*
+
+      Thank you.
 
   # --- A shared group rather than per-site -----------------------------------
   - key: south-coast-managers-meeting
