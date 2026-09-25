@@ -93,6 +93,22 @@
   .detail-table td { text-align: right; padding: 7px 6px; border-top: 1px solid var(--card-border); }
   .detail-empty { color: var(--muted); font-size: 13px; padding: 20px 0; text-align: center; }
   .detail-loading { color: var(--muted); font-size: 13px; padding: 20px 0; text-align: center; }
+
+  /* reviews section */
+  .review-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; margin-top: 4px; }
+  .review-row .name { color: var(--muted); }
+  .stars { color: var(--accent); font-weight: 700; }
+  .neg-alert { margin-top: 10px; background: rgba(248,113,113,0.08); border: 1px solid rgba(248,113,113,0.35);
+    border-radius: 10px; padding: 8px 10px; }
+  .neg-alert .neg-head { display: flex; justify-content: space-between; font-size: 12px; color: var(--down); font-weight: 700; margin-bottom: 3px; }
+  .neg-alert .neg-text { font-size: 12.5px; color: var(--text); line-height: 1.35; }
+  .neg-alert + .neg-alert { margin-top: 6px; }
+
+  /* monthly special card */
+  .special-card { background: var(--card); border: 1px solid var(--card-border); border-radius: 16px;
+    padding: 16px; margin-bottom: 12px; }
+  .special-card .card-top h2 { font-size: 15px; }
+  .special-card .card-top .date { color: var(--accent); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -102,6 +118,7 @@
   </header>
 
   <div class="estate" id="estate"></div>
+  <div id="specialWrap"></div>
   <div class="cards" id="cards"></div>
   <footer>
     <span id="updated"></span> &middot;
@@ -177,6 +194,35 @@ function deliverySection(d) {
     </div>`;
 }
 
+function starStr(rating) {
+  if (rating == null) return '&ndash;';
+  return `<span class="stars">${rating.toFixed(1)}&#9733;</span>`;
+}
+
+function reviewsSection(r) {
+  if (!r) return '';
+  const ln = r.last_night;
+  const wk = r.avg_7d;
+  const lnHtml = ln
+    ? `${starStr(ln.rating)} <span style="color:var(--muted)">(${ln.reviews} review${ln.reviews === 1 ? '' : 's'}${ln.nps != null ? ', NPS ' + Math.round(ln.nps) : ''})</span>`
+    : '<span style="color:var(--muted)">No reviews last night</span>';
+  const wkHtml = wk
+    ? `${starStr(wk.rating)} <span style="color:var(--muted)">(${wk.reviews} review${wk.reviews === 1 ? '' : 's'}, NPS ${Math.round(wk.nps)})</span>`
+    : '<span style="color:var(--muted)">&ndash;</span>';
+  const negHtml = (r.negative_recent || []).map(n => `
+    <div class="neg-alert">
+      <div class="neg-head"><span>${starStr(n.rating)} &middot; ${n.source}</span><span>${new Date(n.date).toLocaleDateString('en-GB', {day:'numeric', month:'short'})}</span></div>
+      <div class="neg-text">${n.snippet ? n.snippet.replace(/</g, '&lt;') : '(no text)'}${n.snippet && n.snippet.length >= 160 ? '&hellip;' : ''}</div>
+    </div>`).join('');
+  return `
+    <div class="section">
+      <div class="section-label">Reviews</div>
+      <div class="review-row"><span class="name">Last night</span><span>${lnHtml}</span></div>
+      <div class="review-row"><span class="name">7-day</span><span>${wkHtml}</span></div>
+      ${negHtml}
+    </div>`;
+}
+
 function periodSection(wtd, mtd) {
   return `
     <div class="section">
@@ -209,8 +255,26 @@ function siteCard(site) {
       ${metrics}
       <div class="spark">${sparkline(site.trend)}</div>
       ${guestSection(site.guest)}
+      ${reviewsSection(site.reviews)}
       ${deliverySection(site.delivery_7d)}
       ${periodSection(site.wtd, site.mtd)}
+    </div>`;
+}
+
+function specialCard(special) {
+  if (!special) return '';
+  const chips = special.sites.map(s => `<span class="chip">${s.name} <b>${s.qty}</b> ${GBP.format(s.revenue)}</span>`).join('');
+  return `
+    <div class="special-card">
+      <div class="card-top">
+        <h2>This month's special</h2>
+        <span class="date">${special.name}</span>
+      </div>
+      <div class="metrics" style="grid-template-columns: 1fr 1fr;">
+        <div class="metric"><div class="label">Units sold</div><div class="value">${special.total_qty}</div></div>
+        <div class="metric"><div class="label">Revenue</div><div class="value">${GBP.format(special.total_revenue)}</div></div>
+      </div>
+      <div class="chips">${chips}</div>
     </div>`;
 }
 
@@ -243,6 +307,7 @@ async function load(force) {
 
 function render(data) {
   estateSummary(data);
+  document.getElementById('specialWrap').innerHTML = specialCard(data.special);
   document.getElementById('cards').innerHTML = data.sites.map(siteCard).join('');
   const latest = data.sites.map(s => s.last_night && s.last_night.date).filter(Boolean).sort().pop();
   document.getElementById('asof').textContent = latest ? `Last night's trading: ${new Date(latest).toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'})}` : 'No data yet';

@@ -35,6 +35,18 @@ cashoff_daily), just parameterised by site + date range instead of a fixed
 of which were EXPLAIN ANALYZE'd beforehand (all four queries return in
 <1s at 90 days/one site -- see project notes). A free-form query box is a
 possible later phase, not this one.
+
+v4 (2026-09-25): added reviews/sentiment (Sentiment Search feed, live since
+5 Jul 2026 -- same v_sentiment_overview/v_sentiment_reviews the Metabase
+"Sentiment & Reviews" dashboard 331 runs on) and monthly-special sales per
+site (v_report_lines.item_category = 'monthly specials', the rolling
+append-only category from [[reference_monthly_specials_rotation]] -- no need
+to know the current SKU, filtering to the current calendar month is enough
+because last month's special comes off the menu). Both EXPLAIN ANALYZE'd
+first: sentiment overview ~11ms, 7-day reviews pull ~490ms, monthly-special
+rollup (full month, all sites) ~1.7s worst case -- all safe under the 15s
+statement_timeout and all folded into the existing 5-min /api/data cache,
+not queried per-request.
 """
 from __future__ import annotations
 
@@ -239,6 +251,62 @@ def fetch_dashboard() -> dict:
         )
         delivery = {NAME_TO_ID.get(r["site"]): r for r in cur.fetchall() if r["site"] in NAME_TO_ID}
 
+        # Reviews/sentiment -- last night's overview row per site (grain='day',
+        # matches Metabase card 566's "-1 day, Europe/London" convention).
+        cur.execute(
+            """
+            SELECT business_location_id, reviews, rating, nps, positive_pct, negative_pct
+            FROM v_sentiment_overview
+            WHERE grain = 'day' AND period_start = CURRENT_DATE - INTERVAL '1 day';
+            """
+        )
+        reviews_last_night = {r["business_location_id"]: r for r in cur.fetchall()}
+
+        # 7-day rolling star-count rollup per site -- rating/NPS recomputed
+        # from summed star counts (the exact vendor formula reverse-engineered
+        # for [[project_sentiment_search]]), not an average-of-averages.
+        cur.execute(
+            """
+            SELECT business_location_id,
+                   SUM(reviews) AS reviews,
+                   SUM(star5) AS star5, SUM(star4) AS star4, SUM(star3) AS star3,
+                   SUM(star2) AS star2, SUM(star1) AS star1
+            FROM v_sentiment_overview
+            WHERE grain = 'day' AND period_start >= CURRENT_DATE - INTERVAL '7 days'
+            GROUP BY business_location_id;
+            """
+        )
+        reviews_7d = {r["business_location_id"]: r for r in cur.fetchall()}
+
+        # Recent negative reviews (<=3 stars), last 3 days -- an early-warning
+        # feed, not the full review list.
+        cur.execute(
+            """
+            SELECT business_location_id, review_date, source, rating, reviewer, review_text
+            FROM v_sentiment_reviews
+            WHERE is_negative AND review_date >= CURRENT_DATE - INTERVAL '3 days'
+            ORDER BY business_location_id, review_date DESC;
+            """
+        )
+        negative_by_site: dict[int, list[dict]] = {}
+        for r in cur.fetchall():
+            bucket = negative_by_site.setdefault(r["business_location_id"], [])
+            if len(bucket) < 2:  # worst/most-recent 2 per site, keep the card compact
+                bucket.append(r)
+
+        # This month's special -- append-only category, so filtering to the
+        # current calendar month is enough (last month's item is off the menu).
+        cur.execute(
+            """
+            SELECT business_location_id, name, SUM(quantity) AS qty, SUM(net_inc_vat) AS revenue
+            FROM v_report_lines
+            WHERE item_category = 'monthly specials'
+              AND business_date >= date_trunc('month', CURRENT_DATE)
+            GROUP BY business_location_id, name;
+            """
+        )
+        special_rows = cur.fetchall()
+
         cur.close()
 
         today = date.today()
@@ -289,6 +357,9 @@ def fetch_dashboard() -> dict:
                     "delivery_7d": delivery_out,
                     "wtd": _period(wtd, wtd_prior),
                     "mtd": _period(mtd, mtd_prior),
+                    "reviews": _reviews_block(
+                        reviews_last_night.get(bl_id), reviews_7d.get(bl_id), negative_by_site.get(bl_id, [])
+                    ),
                 }
             )
 
@@ -299,9 +370,72 @@ def fetch_dashboard() -> dict:
                 "mtd": _period(estate_mtd, estate_mtd_prior),
             },
             "sites": sites_out,
+            "special": _special_block(special_rows),
         }
     finally:
         conn.close()
+
+
+def _reviews_block(last_night_row, week_row, negatives: list) -> dict | None:
+    if not last_night_row and not week_row and not negatives:
+        return None
+
+    ln = None
+    if last_night_row and last_night_row["reviews"]:
+        ln = {
+            "reviews": int(last_night_row["reviews"]),
+            "rating": float(last_night_row["rating"]) if last_night_row["rating"] is not None else None,
+            "nps": float(last_night_row["nps"]) if last_night_row["nps"] is not None else None,
+        }
+
+    wk = None
+    if week_row and week_row["reviews"]:
+        n = int(week_row["reviews"])
+        s5, s4, s3, s2, s1 = (int(week_row[k] or 0) for k in ("star5", "star4", "star3", "star2", "star1"))
+        # Same formula reverse-engineered against the vendor's own monthly
+        # figures in [[project_sentiment_search]] -- exact, not an estimate.
+        rating = (5 * s5 + 4 * s4 + 3 * s3 + 2 * s2 + s1) / n
+        nps = 100 * (s5 - (s3 + s2 + s1)) / n
+        wk = {"reviews": n, "rating": round(rating, 2), "nps": round(nps, 1)}
+
+    neg_out = [
+        {
+            "date": r["review_date"].isoformat(),
+            "source": r["source"],
+            "rating": r["rating"],
+            "reviewer": r["reviewer"],
+            "snippet": (r["review_text"] or "")[:160],
+        }
+        for r in negatives
+    ]
+
+    return {"last_night": ln, "avg_7d": wk, "negative_recent": neg_out}
+
+
+def _special_block(rows: list) -> dict | None:
+    if not rows:
+        return None
+    by_name: dict[str, float] = {}
+    for r in rows:
+        by_name[r["name"]] = by_name.get(r["name"], 0) + float(r["qty"] or 0)
+    name = max(by_name, key=by_name.get)  # the item that's actually moving this month
+
+    by_site: dict[int, dict] = {}
+    for r in rows:
+        s = by_site.setdefault(r["business_location_id"], {"qty": 0.0, "revenue": 0.0})
+        s["qty"] += float(r["qty"] or 0)
+        s["revenue"] += float(r["revenue"] or 0)
+
+    sites_out = [
+        {"id": bl_id, "name": SITES.get(bl_id, "?"), "qty": round(v["qty"]), "revenue": round(v["revenue"], 2)}
+        for bl_id, v in sorted(by_site.items(), key=lambda kv: SITES.get(kv[0], ""))
+    ]
+    return {
+        "name": name,
+        "total_qty": round(sum(s["qty"] for s in sites_out)),
+        "total_revenue": round(sum(s["revenue"] for s in sites_out), 2),
+        "sites": sites_out,
+    }
 
 
 def _period(current: float, prior: float) -> dict:
