@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>T&amp;T Pulse</title>
+<meta name="theme-color" content="#0f172a" />
+<link rel="manifest" href="/manifest.json" />
+<link rel="apple-touch-icon" href="/static/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="T&amp;T Pulse" />
+<style>
+  :root {
+    --bg: #0b1120; --card: #131c31; --card-border: #1f2b47;
+    --text: #f1f5f9; --muted: #8b98b3; --accent: #d97706;
+    --up: #34d399; --down: #f87171;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased; }
+  body { padding: env(safe-area-inset-top) 16px calc(env(safe-area-inset-bottom) + 24px); }
+  header { padding: 20px 0 10px; }
+  header h1 { font-size: 20px; margin: 0 0 2px; font-weight: 700; letter-spacing: -0.2px; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+  .estate { display: flex; gap: 12px; margin: 14px 0 18px; overflow-x: auto; padding-bottom: 2px; }
+  .estate .stat { flex: 1 0 auto; min-width: 104px; background: var(--card); border: 1px solid var(--card-border);
+    border-radius: 12px; padding: 10px 12px; }
+  .estate .stat .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .estate .stat .value { font-size: 18px; font-weight: 700; margin-top: 2px; }
+  .cards { display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--card); border: 1px solid var(--card-border); border-radius: 16px; padding: 16px; }
+  .card-top { display: flex; justify-content: space-between; align-items: baseline; }
+  .card-top h2 { font-size: 16px; margin: 0; font-weight: 700; }
+  .card-top .date { color: var(--muted); font-size: 12px; }
+  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+  .metric .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; }
+  .metric .value { font-size: 20px; font-weight: 700; margin-top: 2px; }
+  .metric .delta { font-size: 12px; margin-top: 1px; }
+  .delta.up { color: var(--up); } .delta.down { color: var(--down); }
+  .spark { margin-top: 14px; }
+  .spark svg { width: 100%; height: 44px; display: block; }
+  .empty { color: var(--muted); font-size: 13px; padding: 4px 0; }
+  footer { text-align: center; color: var(--muted); font-size: 11px; margin-top: 22px; }
+  .refresh-btn { background: none; border: 1px solid var(--card-border); color: var(--muted);
+    border-radius: 999px; padding: 6px 12px; font-size: 12px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Tap &amp; Tandoor Pulse</h1>
+    <p id="asof">Loading last night's numbers&hellip;</p>
+  </header>
+
+  <div class="estate" id="estate"></div>
+  <div class="cards" id="cards"></div>
+  <footer>
+    <span id="updated"></span> &middot;
+    <button class="refresh-btn" onclick="load(true)">Refresh</button>
+  </footer>
+
+<script>
+const GBP = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 });
+const GBP2 = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 2 });
+
+function sparkline(points) {
+  if (!points || points.length < 2) return '';
+  const vals = points.map(p => p.revenue);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const range = (max - min) || 1;
+  const w = 300, h = 44, n = points.length;
+  const coords = points.map((p, i) => {
+    const x = (i / (n - 1)) * w;
+    const y = h - ((p.revenue - min) / range) * (h - 6) - 3;
+    return [x, y];
+  });
+  const path = coords.map((c, i) => (i === 0 ? 'M' : 'L') + c[0].toFixed(1) + ',' + c[1].toFixed(1)).join(' ');
+  const last = coords[coords.length - 1];
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <path d="${path}" fill="none" stroke="#d97706" stroke-width="2" vector-effect="non-scaling-stroke" />
+    <circle cx="${last[0]}" cy="${last[1]}" r="3.5" fill="#d97706" />
+  </svg>`;
+}
+
+function siteCard(site) {
+  const ln = site.last_night;
+  let deltaHtml = '';
+  if (ln && site.avg_7d) {
+    const pct = ((ln.revenue - site.avg_7d) / site.avg_7d) * 100;
+    const cls = pct >= 0 ? 'up' : 'down';
+    const arrow = pct >= 0 ? '&uarr;' : '&darr;';
+    deltaHtml = `<div class="delta ${cls}">${arrow} ${Math.abs(pct).toFixed(0)}% vs 7d avg</div>`;
+  }
+  const metrics = ln ? `
+    <div class="metrics">
+      <div class="metric"><div class="label">Revenue</div><div class="value">${GBP.format(ln.revenue)}</div>${deltaHtml}</div>
+      <div class="metric"><div class="label">Covers</div><div class="value">${ln.covers}</div></div>
+      <div class="metric"><div class="label">Spend/head</div><div class="value">${ln.apc != null ? GBP2.format(ln.apc) : '&ndash;'}</div></div>
+    </div>` : '<div class="empty">No trading data yet</div>';
+
+  return `
+    <div class="card">
+      <div class="card-top">
+        <h2>${site.name}</h2>
+        <span class="date">${ln ? new Date(ln.date).toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short'}) : ''}</span>
+      </div>
+      ${metrics}
+      <div class="spark">${sparkline(site.trend)}</div>
+    </div>`;
+}
+
+function estateSummary(data) {
+  const total = data.sites.reduce((s, x) => s + (x.last_night ? x.last_night.revenue : 0), 0);
+  const avgTotal = data.sites.reduce((s, x) => s + (x.avg_7d || 0), 0);
+  const covers = data.sites.reduce((s, x) => s + (x.last_night ? x.last_night.covers : 0), 0);
+  const pct = avgTotal ? ((total - avgTotal) / avgTotal) * 100 : 0;
+  document.getElementById('estate').innerHTML = `
+    <div class="stat"><div class="label">Estate last night</div><div class="value">${GBP.format(total)}</div></div>
+    <div class="stat"><div class="label">Covers</div><div class="value">${covers}</div></div>
+    <div class="stat"><div class="label">vs 7d avg</div><div class="value" style="color:${pct>=0?'#34d399':'#f87171'}">${pct>=0?'+':''}${pct.toFixed(0)}%</div></div>
+  `;
+}
+
+async function load(force) {
+  document.getElementById('asof').textContent = 'Refreshing…';
+  try {
+    const res = await fetch('/api/data' + (force ? ('?_=' + Date.now()) : ''));
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    render(data);
+  } catch (e) {
+    document.getElementById('asof').textContent = 'Could not refresh — showing last known numbers.';
+  }
+}
+
+function render(data) {
+  estateSummary(data);
+  document.getElementById('cards').innerHTML = data.sites.map(siteCard).join('');
+  const latest = data.sites.map(s => s.last_night && s.last_night.date).filter(Boolean).sort().pop();
+  document.getElementById('asof').textContent = latest ? `Last night's trading: ${new Date(latest).toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'})}` : 'No data yet';
+  document.getElementById('updated').textContent = 'Updated ' + new Date(data.generated_at * 1000).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+}
+
+load(false);
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>
