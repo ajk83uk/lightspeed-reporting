@@ -55,7 +55,8 @@ CACHE_TTL = 300  # seconds -- Lightspeed/cashoff data only refreshes overnight a
 def connect():
     conn = psycopg2.connect(DATABASE_URL.strip())
     conn.autocommit = True
-    conn.set_session(statement_timeout=15000)  # ms -- fail fast, never hang a phone request
+    with conn.cursor() as _c:
+        _c.execute("SET statement_timeout = 15000")  # ms -- fail fast, never hang a phone request
     return conn
 
 
