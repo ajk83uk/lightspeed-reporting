@@ -29,6 +29,7 @@
     border-radius: 12px; padding: 10px 12px; }
   .estate .stat .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
   .estate .stat .value { font-size: 18px; font-weight: 700; margin-top: 2px; }
+  .estate .stat .sub { font-size: 11px; margin-top: 1px; }
   .cards { display: flex; flex-direction: column; gap: 12px; }
   .card { background: var(--card); border: 1px solid var(--card-border); border-radius: 16px; padding: 16px; }
   .card-top { display: flex; justify-content: space-between; align-items: baseline; }
@@ -42,6 +43,18 @@
   .spark { margin-top: 14px; }
   .spark svg { width: 100%; height: 44px; display: block; }
   .empty { color: var(--muted); font-size: 13px; padding: 4px 0; }
+  .section { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--card-border); }
+  .section .section-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 8px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .mini .label { color: var(--muted); font-size: 11px; }
+  .mini .value { font-size: 16px; font-weight: 700; margin-top: 1px; }
+  .mini .value .sub { color: var(--muted); font-size: 11px; font-weight: 400; margin-left: 4px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip { background: #0e1626; border: 1px solid var(--card-border); border-radius: 999px;
+    padding: 4px 10px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .chip b { color: var(--text); font-weight: 600; }
+  .period-line { display: flex; justify-content: space-between; font-size: 13px; margin-top: 4px; }
+  .period-line .name { color: var(--muted); }
   footer { text-align: center; color: var(--muted); font-size: 11px; margin-top: 22px; }
   .refresh-btn { background: none; border: 1px solid var(--card-border); color: var(--muted);
     border-radius: 999px; padding: 6px 12px; font-size: 12px; }
@@ -83,18 +96,62 @@ function sparkline(points) {
   </svg>`;
 }
 
+function pctDelta(pct) {
+  if (pct == null) return '';
+  const cls = pct >= 0 ? 'up' : 'down';
+  const arrow = pct >= 0 ? '&uarr;' : '&darr;';
+  return `<span class="delta ${cls}">${arrow} ${Math.abs(pct).toFixed(0)}%</span>`;
+}
+
+function guestSection(guest) {
+  if (!guest) return '';
+  const sph = guest.spend_per_head != null ? GBP2.format(guest.spend_per_head) : '&ndash;';
+  const sphAvg = guest.spend_per_head_avg7 != null ? `<span class="sub">7d avg ${GBP2.format(guest.spend_per_head_avg7)}</span>` : '';
+  const ppc = guest.plates_per_cover != null ? guest.plates_per_cover.toFixed(2) : '&ndash;';
+  const ppcAvg = guest.plates_per_cover_avg7 != null ? `<span class="sub">7d avg ${guest.plates_per_cover_avg7.toFixed(2)}</span>` : '';
+  return `
+    <div class="section">
+      <div class="section-label">Guest metrics</div>
+      <div class="row2">
+        <div class="mini"><div class="label">Spend / head</div><div class="value">${sph}${sphAvg}</div></div>
+        <div class="mini"><div class="label">Plates / cover</div><div class="value">${ppc}${ppcAvg}</div></div>
+      </div>
+    </div>`;
+}
+
+function deliverySection(d) {
+  if (!d) return '';
+  return `
+    <div class="section">
+      <div class="section-label">Delivery &amp; takeaway &middot; last 7 days &middot; ${GBP.format(d.total)}</div>
+      <div class="chips">
+        <span class="chip">Uber Eats <b>${GBP.format(d.uber_eats)}</b></span>
+        <span class="chip">Just Eat <b>${GBP.format(d.just_eat)}</b></span>
+        <span class="chip">Deliveroo <b>${GBP.format(d.deliveroo)}</b></span>
+        <span class="chip">Online <b>${GBP.format(d.online_orders)}</b></span>
+      </div>
+    </div>`;
+}
+
+function periodSection(wtd, mtd) {
+  return `
+    <div class="section">
+      <div class="section-label">This period</div>
+      <div class="period-line"><span class="name">Week to date</span><span>${GBP.format(wtd.total)} ${pctDelta(wtd.pct_vs_prior)}</span></div>
+      <div class="period-line"><span class="name">Month to date</span><span>${GBP.format(mtd.total)} ${pctDelta(mtd.pct_vs_prior)}</span></div>
+    </div>`;
+}
+
 function siteCard(site) {
   const ln = site.last_night;
   let deltaHtml = '';
   if (ln && site.avg_7d) {
     const pct = ((ln.revenue - site.avg_7d) / site.avg_7d) * 100;
-    const cls = pct >= 0 ? 'up' : 'down';
-    const arrow = pct >= 0 ? '&uarr;' : '&darr;';
-    deltaHtml = `<div class="delta ${cls}">${arrow} ${Math.abs(pct).toFixed(0)}% vs 7d avg</div>`;
+    deltaHtml = `${pctDelta(pct)} <span style="color:var(--muted);font-size:11px">vs 7d avg</span>`;
   }
   const metrics = ln ? `
     <div class="metrics">
-      <div class="metric"><div class="label">Revenue</div><div class="value">${GBP.format(ln.revenue)}</div>${deltaHtml}</div>
+      <div class="metric"><div class="label">Revenue</div><div class="value">${GBP.format(ln.revenue)}</div><div class="delta">${deltaHtml}</div></div>
       <div class="metric"><div class="label">Covers</div><div class="value">${ln.covers}</div></div>
       <div class="metric"><div class="label">Spend/head</div><div class="value">${ln.apc != null ? GBP2.format(ln.apc) : '&ndash;'}</div></div>
     </div>` : '<div class="empty">No trading data yet</div>';
@@ -107,6 +164,9 @@ function siteCard(site) {
       </div>
       ${metrics}
       <div class="spark">${sparkline(site.trend)}</div>
+      ${guestSection(site.guest)}
+      ${deliverySection(site.delivery_7d)}
+      ${periodSection(site.wtd, site.mtd)}
     </div>`;
 }
 
@@ -115,10 +175,13 @@ function estateSummary(data) {
   const avgTotal = data.sites.reduce((s, x) => s + (x.avg_7d || 0), 0);
   const covers = data.sites.reduce((s, x) => s + (x.last_night ? x.last_night.covers : 0), 0);
   const pct = avgTotal ? ((total - avgTotal) / avgTotal) * 100 : 0;
+  const wtd = data.estate.wtd, mtd = data.estate.mtd;
   document.getElementById('estate').innerHTML = `
     <div class="stat"><div class="label">Estate last night</div><div class="value">${GBP.format(total)}</div></div>
     <div class="stat"><div class="label">Covers</div><div class="value">${covers}</div></div>
     <div class="stat"><div class="label">vs 7d avg</div><div class="value" style="color:${pct>=0?'#34d399':'#f87171'}">${pct>=0?'+':''}${pct.toFixed(0)}%</div></div>
+    <div class="stat"><div class="label">Week to date</div><div class="value">${GBP.format(wtd.total)}</div><div class="sub">${pctDelta(wtd.pct_vs_prior)} vs last wk</div></div>
+    <div class="stat"><div class="label">Month to date</div><div class="value">${GBP.format(mtd.total)}</div><div class="sub">${pctDelta(mtd.pct_vs_prior)} vs last mth</div></div>
   `;
 }
 
