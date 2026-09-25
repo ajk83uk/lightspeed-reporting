@@ -1,5 +1,12 @@
-const CACHE = "tt-pulse-v1";
-const SHELL = ["/", "/manifest.json", "/static/icon-192.png", "/static/icon-512.png"];
+// v2 (2026-09-25): the page shell ("/") used to be cache-first, so once a
+// phone had it cached, every later deploy (drill-down, reviews, monthly
+// special) silently never showed up -- this file's own bytes hadn't
+// changed, so the browser never even re-checked for an update. Fix: "/" is
+// now network-first too, same pattern as /api/data, so a new deploy shows
+// up on next load and the app still works offline from the last-seen copy.
+const CACHE = "tt-pulse-v2";
+const SHELL = ["/manifest.json", "/static/icon-192.png", "/static/icon-512.png"];
+const NETWORK_FIRST = new Set(["/", "/api/data"]);
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)));
@@ -17,8 +24,8 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
-  if (url.pathname === "/api/data") {
-    // network-first, fall back to last cached numbers when offline
+  if (NETWORK_FIRST.has(url.pathname)) {
+    // network-first, fall back to the last cached copy when offline
     event.respondWith(
       fetch(event.request)
         .then((res) => {
