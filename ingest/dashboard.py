@@ -24,6 +24,17 @@ v2 (2026-09-25): added delivery/takeaway split (cashoff_daily), guest metrics
 artifact (v_covers_clean private-function-netted cover basis, and
 v_plates_per_cover_site) -- and estate week-to-date / month-to-date totals
 with a vs-prior-period comparison.
+
+v3 (2026-09-25): added a per-site date-range drill-down (/api/site/<id>).
+Tap a card, pick 7/30/90 days or a custom range, get a day-by-day table +
+chart for that site only. Deliberately NOT a free-form SQL/query box --
+every query is one of the four fixed, pre-verified shapes already used by
+the main dashboard (v_site_day_apc, v_covers_clean, v_plates_per_cover_site,
+cashoff_daily), just parameterised by site + date range instead of a fixed
+7/8/65-day window. Range is capped at 90 days and always single-site, both
+of which were EXPLAIN ANALYZE'd beforehand (all four queries return in
+<1s at 90 days/one site -- see project notes). A free-form query box is a
+possible later phase, not this one.
 """
 from __future__ import annotations
 
@@ -335,6 +346,161 @@ def _fmt_last_night(r):
     }
 
 
+# --- drill-down: per-site date-range detail -------------------------------
+MAX_RANGE_DAYS = 90
+_detail_cache: dict = {}  # (site_id, start, end) -> {"at": ts, "data": {...}}
+_DETAIL_CACHE_MAX = 40  # small LRU-ish cap -- this is a handful of buttons, not a query box
+
+
+def _parse_range(args) -> tuple[date, date]:
+    """Resolve ?range=7|30|90 or ?from=YYYY-MM-DD&to=YYYY-MM-DD, clamped safe."""
+    today = date.today()
+    raw_from, raw_to = args.get("from"), args.get("to")
+    if raw_from and raw_to:
+        try:
+            start = date.fromisoformat(raw_from)
+            end = date.fromisoformat(raw_to)
+        except ValueError:
+            raise ValueError("from/to must be YYYY-MM-DD")
+    else:
+        try:
+            n = int(args.get("range", 7))
+        except (TypeError, ValueError):
+            n = 7
+        n = max(1, min(n, MAX_RANGE_DAYS))
+        end = today
+        start = end - timedelta(days=n - 1)
+
+    if start > end:
+        start, end = end, start
+    end = min(end, today)  # no future dates
+    if (end - start).days > MAX_RANGE_DAYS:
+        start = end - timedelta(days=MAX_RANGE_DAYS)
+    if (end - start).days < 0:
+        start = end
+    return start, end
+
+
+def fetch_site_detail(site_id: int, start: date, end: date) -> dict:
+    name = SITES[site_id]
+    conn = connect()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        cur.execute(
+            """
+            SELECT biz_date,
+                   COALESCE(dining_revenue,0) + COALESCE(bar_revenue,0) AS revenue,
+                   covers_clean AS covers,
+                   apc_dining AS apc
+            FROM v_site_day_apc
+            WHERE business_location_id = %s AND biz_date BETWEEN %s AND %s
+            ORDER BY biz_date;
+            """,
+            (site_id, start, end),
+        )
+        by_date: dict[date, dict] = {}
+        for r in cur.fetchall():
+            by_date[r["biz_date"]] = {
+                "date": r["biz_date"].isoformat(),
+                "revenue": float(r["revenue"] or 0),
+                "covers": int(r["covers"] or 0),
+                "apc": float(r["apc"]) if r["apc"] is not None else None,
+                "spend_per_head": None,
+                "plates_per_cover": None,
+                "delivery_total": 0.0,
+                "uber_eats": 0.0,
+                "just_eat": 0.0,
+                "deliveroo": 0.0,
+                "online_orders": 0.0,
+            }
+
+        cur.execute(
+            """
+            SELECT biz_date,
+                   SUM(fb_rev) FILTER (
+                       WHERE is_dining_check
+                         AND NOT (nb_covers >= 5 AND fb_rev / NULLIF(nb_covers,0) < 3)
+                   ) AS fb_rev_clean,
+                   SUM(nb_covers) FILTER (
+                       WHERE is_dining_check
+                         AND NOT (nb_covers >= 5 AND fb_rev / NULLIF(nb_covers,0) < 3)
+                   ) AS covers_clean
+            FROM v_covers_clean
+            WHERE business_location_id = %s AND biz_date BETWEEN %s AND %s
+            GROUP BY biz_date;
+            """,
+            (site_id, start, end),
+        )
+        for r in cur.fetchall():
+            fb, cv = r["fb_rev_clean"], r["covers_clean"]
+            if r["biz_date"] in by_date and fb is not None and cv:
+                by_date[r["biz_date"]]["spend_per_head"] = round(float(fb) / float(cv), 2)
+
+        cur.execute(
+            """
+            SELECT business_date, plates_per_cover
+            FROM v_plates_per_cover_site
+            WHERE business_location_id = %s AND business_date BETWEEN %s AND %s;
+            """,
+            (site_id, start, end),
+        )
+        for r in cur.fetchall():
+            if r["business_date"] in by_date and r["plates_per_cover"] is not None:
+                by_date[r["business_date"]]["plates_per_cover"] = round(float(r["plates_per_cover"]), 2)
+
+        cur.execute(
+            """
+            SELECT business_date,
+                   COALESCE(uber_eats,0) AS uber_eats,
+                   COALESCE(just_eat,0) AS just_eat,
+                   COALESCE(deliveroo,0) AS deliveroo,
+                   COALESCE(online_orders,0) AS online_orders
+            FROM cashoff_daily
+            WHERE site = %s AND business_date BETWEEN %s AND %s;
+            """,
+            (name, start, end),
+        )
+        for r in cur.fetchall():
+            d = by_date.setdefault(
+                r["business_date"],
+                {
+                    "date": r["business_date"].isoformat(), "revenue": 0.0, "covers": 0, "apc": None,
+                    "spend_per_head": None, "plates_per_cover": None, "delivery_total": 0.0,
+                    "uber_eats": 0.0, "just_eat": 0.0, "deliveroo": 0.0, "online_orders": 0.0,
+                },
+            )
+            d["uber_eats"] = float(r["uber_eats"])
+            d["just_eat"] = float(r["just_eat"])
+            d["deliveroo"] = float(r["deliveroo"])
+            d["online_orders"] = float(r["online_orders"])
+            d["delivery_total"] = float(r["uber_eats"] + r["just_eat"] + r["deliveroo"] + r["online_orders"])
+
+        cur.close()
+
+        days = [by_date[d] for d in sorted(by_date.keys())]
+        totals = {
+            "revenue": round(sum(d["revenue"] for d in days), 2),
+            "covers": sum(d["covers"] for d in days),
+            "delivery_total": round(sum(d["delivery_total"] for d in days), 2),
+        }
+        spend_num = sum(d["spend_per_head"] * d["covers"] for d in days if d["spend_per_head"] is not None and d["covers"])
+        spend_den = sum(d["covers"] for d in days if d["spend_per_head"] is not None and d["covers"])
+        totals["spend_per_head_avg"] = round(spend_num / spend_den, 2) if spend_den else None
+        totals["apc_avg"] = round(totals["revenue"] / totals["covers"], 2) if totals["covers"] else None
+
+        return {
+            "site_id": site_id,
+            "name": name,
+            "from": start.isoformat(),
+            "to": end.isoformat(),
+            "days": days,
+            "totals": totals,
+        }
+    finally:
+        conn.close()
+
+
 # --- routes --------------------------------------------------------------
 @app.get("/healthz")
 def healthz():
@@ -358,6 +524,36 @@ def api_data():
             if _cache["data"] is None:
                 return jsonify({"error": "data unavailable"}), 502
     return jsonify(_cache["data"])
+
+
+@app.get("/api/site/<int:site_id>")
+def api_site_detail(site_id: int):
+    if site_id not in SITES:
+        return jsonify({"error": "unknown site"}), 404
+    try:
+        start, end = _parse_range(request.args)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    key = (site_id, start.isoformat(), end.isoformat())
+    now = time.time()
+    cached = _detail_cache.get(key)
+    if cached and now - cached["at"] <= CACHE_TTL:
+        return jsonify(cached["data"])
+
+    try:
+        data = fetch_site_detail(site_id, start, end)
+    except Exception:
+        log.exception("fetch_site_detail failed for %s", key)
+        if cached:
+            return jsonify(cached["data"])
+        return jsonify({"error": "data unavailable"}), 502
+
+    if len(_detail_cache) >= _DETAIL_CACHE_MAX:
+        oldest = min(_detail_cache, key=lambda k: _detail_cache[k]["at"])
+        _detail_cache.pop(oldest, None)
+    _detail_cache[key] = {"at": now, "data": data}
+    return jsonify(data)
 
 
 @app.get("/manifest.json")

@@ -58,6 +58,41 @@
   footer { text-align: center; color: var(--muted); font-size: 11px; margin-top: 22px; }
   .refresh-btn { background: none; border: 1px solid var(--card-border); color: var(--muted);
     border-radius: 999px; padding: 6px 12px; font-size: 12px; }
+  .card { cursor: pointer; }
+
+  /* drill-down detail sheet */
+  .sheet-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 20;
+    display: none; }
+  .sheet-backdrop.open { display: block; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; top: 8vh; z-index: 21;
+    background: var(--bg); border-radius: 18px 18px 0 0; border: 1px solid var(--card-border);
+    display: flex; flex-direction: column; transform: translateY(100%); transition: transform 0.2s ease-out; }
+  .sheet.open { transform: translateY(0); }
+  .sheet-header { padding: 16px 16px 10px; border-bottom: 1px solid var(--card-border);
+    display: flex; justify-content: space-between; align-items: center; flex: 0 0 auto; }
+  .sheet-header h2 { margin: 0; font-size: 17px; }
+  .sheet-close { background: none; border: none; color: var(--muted); font-size: 22px;
+    line-height: 1; padding: 4px 8px; }
+  .sheet-body { padding: 12px 16px 24px; overflow-y: auto; flex: 1 1 auto; -webkit-overflow-scrolling: touch; }
+  .range-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .range-chip { background: var(--card); border: 1px solid var(--card-border); color: var(--text);
+    border-radius: 999px; padding: 7px 14px; font-size: 13px; }
+  .range-chip.active { background: var(--accent); border-color: var(--accent); color: #1a1206; font-weight: 700; }
+  .custom-range { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .custom-range input { background: var(--card); border: 1px solid var(--card-border); color: var(--text);
+    border-radius: 8px; padding: 6px 8px; font-size: 13px; flex: 1; }
+  .custom-range button { background: var(--card); border: 1px solid var(--card-border); color: var(--text);
+    border-radius: 8px; padding: 7px 12px; font-size: 13px; }
+  .detail-totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+  .detail-chart { margin-bottom: 16px; }
+  .detail-chart svg { width: 100%; height: 90px; display: block; }
+  .detail-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .detail-table th { text-align: right; color: var(--muted); font-weight: 600; font-size: 10.5px;
+    text-transform: uppercase; letter-spacing: 0.2px; padding: 6px 6px; position: sticky; top: 0; background: var(--bg); }
+  .detail-table th:first-child, .detail-table td:first-child { text-align: left; }
+  .detail-table td { text-align: right; padding: 7px 6px; border-top: 1px solid var(--card-border); }
+  .detail-empty { color: var(--muted); font-size: 13px; padding: 20px 0; text-align: center; }
+  .detail-loading { color: var(--muted); font-size: 13px; padding: 20px 0; text-align: center; }
 </style>
 </head>
 <body>
@@ -72,6 +107,15 @@
     <span id="updated"></span> &middot;
     <button class="refresh-btn" onclick="load(true)">Refresh</button>
   </footer>
+
+  <div class="sheet-backdrop" id="sheetBackdrop" onclick="closeSheet()"></div>
+  <div class="sheet" id="sheet">
+    <div class="sheet-header">
+      <h2 id="sheetTitle">Site</h2>
+      <button class="sheet-close" onclick="closeSheet()">&times;</button>
+    </div>
+    <div class="sheet-body" id="sheetBody"></div>
+  </div>
 
 <script>
 const GBP = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 });
@@ -157,7 +201,7 @@ function siteCard(site) {
     </div>` : '<div class="empty">No trading data yet</div>';
 
   return `
-    <div class="card">
+    <div class="card" onclick="openSheet(${site.id}, '${site.name}')">
       <div class="card-top">
         <h2>${site.name}</h2>
         <span class="date">${ln ? new Date(ln.date).toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short'}) : ''}</span>
@@ -203,6 +247,116 @@ function render(data) {
   const latest = data.sites.map(s => s.last_night && s.last_night.date).filter(Boolean).sort().pop();
   document.getElementById('asof').textContent = latest ? `Last night's trading: ${new Date(latest).toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'})}` : 'No data yet';
   document.getElementById('updated').textContent = 'Updated ' + new Date(data.generated_at * 1000).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+}
+
+// --- drill-down sheet ------------------------------------------------
+let sheetSiteId = null;
+let sheetRange = 7; // number of days, or 'custom'
+
+function openSheet(siteId, name) {
+  sheetSiteId = siteId;
+  sheetRange = 7;
+  document.getElementById('sheetTitle').textContent = name;
+  document.getElementById('sheetBackdrop').classList.add('open');
+  document.getElementById('sheet').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  loadDetail();
+}
+
+function closeSheet() {
+  document.getElementById('sheetBackdrop').classList.remove('open');
+  document.getElementById('sheet').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function detailChart(days) {
+  const vals = days.map(d => d.revenue);
+  if (!vals.length) return '';
+  const min = Math.min(...vals, 0), max = Math.max(...vals) || 1;
+  const range = (max - min) || 1;
+  const w = 320, h = 90, n = days.length, barW = Math.max(w / n - 3, 2);
+  const bars = days.map((d, i) => {
+    const x = (i / n) * w;
+    const barH = ((d.revenue - min) / range) * (h - 8);
+    return `<rect x="${x.toFixed(1)}" y="${(h - barH).toFixed(1)}" width="${barW.toFixed(1)}" height="${barH.toFixed(1)}" fill="#d97706" rx="1.5" />`;
+  }).join('');
+  return `<div class="detail-chart"><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${bars}</svg></div>`;
+}
+
+function detailTable(days) {
+  if (!days.length) return '<div class="detail-empty">No trading data in this range</div>';
+  const rows = days.slice().reverse().map(d => {
+    const dt = new Date(d.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+    return `<tr>
+      <td>${dt}</td>
+      <td>${GBP.format(d.revenue)}</td>
+      <td>${d.covers || '&ndash;'}</td>
+      <td>${d.spend_per_head != null ? GBP2.format(d.spend_per_head) : '&ndash;'}</td>
+      <td>${d.plates_per_cover != null ? d.plates_per_cover.toFixed(2) : '&ndash;'}</td>
+      <td>${d.delivery_total ? GBP.format(d.delivery_total) : '&ndash;'}</td>
+    </tr>`;
+  }).join('');
+  return `<table class="detail-table">
+    <thead><tr><th>Date</th><th>Revenue</th><th>Covers</th><th>Spend/hd</th><th>Plates/cvr</th><th>Delivery</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function chipsHtml() {
+  const presets = [7, 30, 90];
+  const chips = presets.map(n => `<button class="range-chip ${sheetRange === n ? 'active' : ''}" onclick="setRange(${n})">${n}d</button>`).join('');
+  const customActive = sheetRange === 'custom';
+  return `<div class="range-chips">${chips}<button class="range-chip ${customActive ? 'active' : ''}" onclick="setRange('custom')">Custom</button></div>` +
+    (customActive ? `
+      <div class="custom-range">
+        <input type="date" id="customFrom" />
+        <span style="color:var(--muted)">&ndash;</span>
+        <input type="date" id="customTo" />
+        <button onclick="loadDetail()">Go</button>
+      </div>` : '');
+}
+
+function setRange(n) {
+  sheetRange = n;
+  loadDetail();
+}
+
+async function loadDetail() {
+  const body = document.getElementById('sheetBody');
+  body.innerHTML = chipsHtml() + '<div class="detail-loading">Loading&hellip;</div>';
+  let url = `/api/site/${sheetSiteId}?`;
+  if (sheetRange === 'custom') {
+    const fromEl = document.getElementById('customFrom');
+    const toEl = document.getElementById('customTo');
+    if (fromEl && toEl && fromEl.value && toEl.value) {
+      url += `from=${fromEl.value}&to=${toEl.value}`;
+    } else {
+      body.innerHTML = chipsHtml();
+      return; // wait for the user to pick both dates
+    }
+  } else {
+    url += `range=${sheetRange}`;
+  }
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    renderDetail(data);
+  } catch (e) {
+    body.innerHTML = chipsHtml() + '<div class="detail-empty">Could not load this range.</div>';
+  }
+}
+
+function renderDetail(data) {
+  const t = data.totals;
+  const totalsHtml = `
+    <div class="detail-totals">
+      <div class="mini"><div class="label">Revenue</div><div class="value">${GBP.format(t.revenue)}</div></div>
+      <div class="mini"><div class="label">Covers</div><div class="value">${t.covers}</div></div>
+      <div class="mini"><div class="label">Spend/head</div><div class="value">${t.spend_per_head_avg != null ? GBP2.format(t.spend_per_head_avg) : '&ndash;'}</div></div>
+    </div>`;
+  document.getElementById('sheetBody').innerHTML =
+    chipsHtml() + totalsHtml + detailChart(data.days) + detailTable(data.days);
 }
 
 load(false);
