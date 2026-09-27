@@ -195,8 +195,13 @@ function deliverySection(d) {
 }
 
 function starStr(rating) {
+  // Number(...) guard: a rating that arrives as a string (e.g. an
+  // un-cast Decimal from the backend) used to throw on .toFixed(), which
+  // aborted the whole card render silently. Coerce defensively.
   if (rating == null) return '&ndash;';
-  return `<span class="stars">${rating.toFixed(1)}&#9733;</span>`;
+  const n = Number(rating);
+  if (Number.isNaN(n)) return '&ndash;';
+  return `<span class="stars">${n.toFixed(1)}&#9733;</span>`;
 }
 
 function reviewsSection(r) {

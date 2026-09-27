@@ -402,7 +402,14 @@ def _reviews_block(last_night_row, week_row, negatives: list) -> dict | None:
         {
             "date": r["review_date"].isoformat(),
             "source": r["source"],
-            "rating": r["rating"],
+            # Bug (2026-09-27): this was the bare Decimal from Postgres. Flask's
+            # JSON encoder serializes an unconverted Decimal as a *string*
+            # ("2.0"), and the front end's starStr() calls .toFixed(1) on it --
+            # a Number method -- which throws mid-way through the site-cards
+            # .map(), aborting it entirely while the (already-rendered) special
+            # card stays up. Symptom: special card shows, site cards don't.
+            # Cast explicitly, same as every other rating field in this file.
+            "rating": float(r["rating"]) if r["rating"] is not None else None,
             "reviewer": r["reviewer"],
             "snippet": (r["review_text"] or "")[:160],
         }
