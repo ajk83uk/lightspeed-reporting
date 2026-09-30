@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import requests
@@ -51,6 +51,27 @@ EARLIEST_HOUR = 11        # sites open at midday; don't flag a 10:30 start
 FIXTURES_URL = "https://www-service.fanzo.com/venues/{venue}/fixture/widget-json"
 UA = {"User-Agent": "Tap-and-Tandoor-ops/1.0"}
 TIMEOUT = 20
+
+# --- week-ahead fixture guide (for the Wednesday rota prompt) ---------------
+#
+# The venue feed only reaches ~4 days out, but a rota is built for the week
+# AFTER next. So the week-ahead list comes from FANZO's public TV guide pages
+# instead, which run several weeks ahead and carry channels.
+#
+# These are national listings, NOT our venue's chosen fixtures — they say
+# what is ON, so managers can staff for it. Whether we show a given game is
+# still a FANZO dashboard decision.
+TV_GUIDE = {
+    "Premier League":   "https://www.fanzo.com/en/tvguide/football/premier-league/5159",
+    "Champions League": "https://www.fanzo.com/en/tvguide/football/uefa-champions-league/5205",
+    "Rugby":            "https://www.fanzo.com/en/tvguide/rugby-union/5283",
+}
+
+# Rugby carries a lot of French Top 14 on Premier Sports, which draws little
+# trade here. "Key" means internationals and the English club game.
+KEY_RUGBY = ("international", "prem rugby", "premiership rugby", "champions cup",
+             "six nations", "rugby championship", "nations championship",
+             "autumn nations")
 
 _NEXT_DATA = re.compile(
     r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
@@ -171,5 +192,109 @@ def block(venue: int = FANZO_VENUE, on: datetime | None = None) -> str:
     return "\n".join(lines)
 
 
+def _guide_fixtures(url: str) -> list[dict]:
+    """Fixtures + channels from one FANZO TV guide page (server-rendered)."""
+    html = requests.get(url, timeout=TIMEOUT, headers=UA).text
+    m = _NEXT_DATA.search(html)
+    if not m:
+        return []
+    data = json.loads(m.group(1))
+    return (data["props"]["pageProps"]["extraData"]["TVGuide"]
+                ["tvGuideSSRData"]["data"])
+
+
+def week_ahead(on: datetime | None = None) -> tuple[dict, bool]:
+    """Key fixtures for the week a rota is being built for.
+
+    Returns ({date: [fixture, ...]}, truncated) where `truncated` names any
+    competition whose listing hit FANZO's 10-fixture page cap before the week
+    ended. Better to say the list is partial than to let a manager staff a
+    Tuesday believing they've seen the whole card.
+    """
+    now = on or datetime.now(LONDON)
+    monday = (now + timedelta(days=7 - now.weekday())).date()
+    sunday = monday + timedelta(days=6)
+
+    days: dict = {}
+    truncated: list = []
+
+    for label, url in TV_GUIDE.items():
+        try:
+            raw = _guide_fixtures(url)
+        except Exception:
+            truncated.append(label)
+            continue
+        if not raw:
+            continue
+
+        seen_to = None
+        for f in raw:
+            try:
+                local = datetime.fromisoformat(
+                    f["startTimeUtc"].replace("Z", "+00:00")).astimezone(LONDON)
+            except (KeyError, ValueError):
+                continue
+            seen_to = local.date() if seen_to is None else max(seen_to, local.date())
+
+            comp = (f.get("competition") or {}).get("name", "")
+            if label == "Rugby" and not any(k in comp.lower() for k in KEY_RUGBY):
+                continue
+            if not (monday <= local.date() <= sunday):
+                continue
+
+            days.setdefault(local.date(), []).append({
+                "time": local.strftime("%H:%M"),
+                "name": f.get("name", ""),
+                "competition": comp or label,
+                "channel": ", ".join(c["name"] for c in (f.get("channels") or [])
+                                     if c.get("name")) or None,
+            })
+
+        # FANZO caps each guide page at 10 fixtures with no pagination (tested
+        # 4 Sep 2026: page/limit/date params all ignored). If we got the full
+        # 10 AND they stop before the week ends, there are more we can't see —
+        # a Champions League matchday is ~18 games, so this fires on those.
+        if len(raw) >= 10 and seen_to is not None and seen_to < sunday:
+            truncated.append(label)
+
+    for d in days:
+        days[d].sort(key=lambda x: x["time"])
+    return days, truncated
+
+
+def week_ahead_block(on: datetime | None = None) -> str:
+    """Day-by-day fixture overview for the rota week. '' if nothing found.
+
+    Never raises — a dead source must not stop the rota prompt going out.
+    """
+    try:
+        days, truncated = week_ahead(on)
+    except Exception:
+        return ""
+    if not days:
+        return ""
+
+    monday = min(days)
+    lines = [f"*Sport in the week you're planning* ({monday:%-d %b} onwards)"]
+    for day in sorted(days):
+        lines.append("")
+        lines.append(f"*{day:%A %-d %b}*")
+        for f in days[day]:
+            lines.append(f"  {f['time']}  {f['name']}")
+            detail = f["competition"]
+            if f["channel"]:
+                detail += f" · {f['channel']}"
+            lines.append(f"          {detail}")
+    if truncated:
+        lines.append("")
+        lines.append(f"_{' and '.join(truncated)}: the listing caps at 10 games, "
+                     f"so the biggest are shown but not the full card._")
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
-    print(block() or "(nothing on today)")
+    import sys
+    if "--week" in sys.argv:
+        print(week_ahead_block() or "(no key fixtures found)")
+    else:
+        print(block() or "(nothing on today)")

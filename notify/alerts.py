@@ -70,6 +70,7 @@ class Rule:
     description: Optional[str] = None
     sites: Optional[list] = None      # reminders: limit to these site keys
     sport_block: bool = False         # append today's live-sport fixtures
+    week_ahead: bool = False          # append next week's key fixtures
     weekend_shift: Optional[str] = None   # 'previous_friday' — see due_now
 
     @property
@@ -306,6 +307,7 @@ def load_rules(path: Path | str = ALERTS_PATH) -> list[Rule]:
             description=entry.get("description"),
             sites=entry.get("sites"),
             sport_block=entry.get("sport_block", False),
+            week_ahead=entry.get("week_ahead", False),
             weekend_shift=entry.get("weekend_shift"),
         ))
 
@@ -353,6 +355,7 @@ def load_reminders(path: Path | str = REMINDERS_PATH) -> list[Rule]:
             description=entry.get("description"),
             sites=entry.get("sites"),
             weekend_shift=entry.get("weekend_shift"),
+            week_ahead=entry.get("week_ahead", False),
         ))
 
     keys = [r.key for r in out]

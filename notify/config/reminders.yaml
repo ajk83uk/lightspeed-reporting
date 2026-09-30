@@ -115,6 +115,27 @@ reminders:
 
       Thank you.
 
+  # --- Southampton: bookers' orders, twice weekly ---------------------------
+  # Requested 30 Sep 2026. Southampton were missing bookers' orders.
+  # Wording is Ajay's own — do not paraphrase it.
+  - key: southampton-bookers-order
+    enabled: true
+    title: Place the bookers' order
+    schedule: "0 13 * * 0,3"       # Sundays and Wednesdays, 13:00
+    sites: [tt-southampton]
+    route: site
+    message: |
+      *PLACE BOOKER ORDER BY 3PM*
+
+      Check with kitchen what they need, place the diced lamb and minced lamb
+      via whats app. If you need to place an order for lamb chops please
+      message in the Zen Zap group to notify Avishek who will then arrange the
+      delivery for you.
+
+      Please place your online order in time.
+
+      Thank you
+
   # --- A shared group rather than per-site -----------------------------------
   - key: south-coast-managers-meeting
     enabled: false

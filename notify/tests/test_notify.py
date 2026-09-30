@@ -481,6 +481,9 @@ APPROVED_SENDERS = {
     "portsmouth-server-apc",   # daily 11:00, Portsmouth (requested 25 Aug 2026)
     "wednesday-rota-prompt",   # Wed 14:00, group        (requested 25 Aug 2026)
     "ft-vs-ls-covers",         # daily 11:00, all sites  (requested 26 Aug 2026)
+    "southampton-dishwasher-weekly",  # Wed 15:00, S'ton  (requested 3 Sep 2026)
+    "southampton-bookers-order",      # Wed+Sun 13:00, S'ton (req 30 Sep 2026)
+    "sunday-preorders-saturday",      # Sat 14:00, all sites (added before 30 Sep 2026)
 }
 
 
@@ -1222,3 +1225,115 @@ def test_ft_ls_gap_is_never_negative():
     rule = next(r for r in load_all() if r.key == "ft-vs-ls-covers")
     for r in db.query(rule.sql):
         assert r["gap"] >= 0, r
+
+
+# ------------------------------------------ week-ahead fixtures on the rota prompt
+
+def test_only_the_rota_prompt_carries_the_week_ahead_list():
+    """It exists to help build a rota. Bolting it onto the daily brief would
+    put 20 lines of next week's football in front of five sites every day."""
+    from notify.alerts import load_all
+    carriers = [r.key for r in load_all() if r.week_ahead]
+    assert carriers == ["wednesday-rota-prompt"], carriers
+
+
+def test_week_ahead_covers_the_week_the_rota_is_for():
+    """A rota built on Wednesday is for the week AFTER the coming Sunday.
+    The venue feed only reaches ~4 days out, which is why this comes from the
+    TV guide pages instead."""
+    from notify import sport
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    L = ZoneInfo("Europe/London")
+    wed = datetime(2026, 9, 9, 14, 0, tzinfo=L)          # a Wednesday
+    days, _ = sport.week_ahead(on=wed)
+    if not days:
+        return                                            # source empty, not a failure
+    monday = (wed + timedelta(days=7 - wed.weekday())).date()
+    assert min(days) >= monday
+    assert max(days) <= monday + timedelta(days=6)
+
+
+def test_week_ahead_drops_f1_and_minor_rugby(monkeypatch):
+    """Ajay asked for Premier League, Champions League and KEY rugby only.
+    French Top 14 on Premier Sports draws little trade here; F1 isn't sourced
+    at all."""
+    from notify import sport
+    assert "f1" not in str(sport.TV_GUIDE).lower()
+    assert "motor" not in str(sport.TV_GUIDE).lower()
+    assert "top 14" not in " ".join(sport.KEY_RUGBY)
+    assert any("international" in k for k in sport.KEY_RUGBY)
+    assert any("prem" in k for k in sport.KEY_RUGBY)
+
+
+def test_week_ahead_says_when_a_listing_is_capped(monkeypatch):
+    """FANZO caps each guide page at 10 fixtures and ignores paging params,
+    so a Champions League matchday (~18 games) always arrives partial. A
+    manager staffing a Tuesday must not think they've seen the full card."""
+    from notify import sport
+
+    def fake(url):
+        # 10 fixtures = the cap, all before the week ends
+        return [{"startTimeUtc": "2026-09-08T18:00:00+00:00",
+                 "name": f"A{i} vs B{i}",
+                 "competition": {"name": "UEFA Champions League"},
+                 "channels": [{"name": "TNT Sports 1"}]} for i in range(10)]
+
+    monkeypatch.setattr(sport, "_guide_fixtures", fake)
+    monkeypatch.setattr(sport, "TV_GUIDE", {"Champions League": "x"})
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    out = sport.week_ahead_block(
+        on=datetime(2026, 9, 2, 14, 0, tzinfo=ZoneInfo("Europe/London")))
+    assert "caps at 10" in out
+
+
+def test_week_ahead_failure_does_not_stop_the_rota_prompt(monkeypatch):
+    from notify import sport
+    def boom(*a, **k):
+        raise RuntimeError("fanzo down")
+    monkeypatch.setattr(sport, "_guide_fixtures", boom)
+    assert sport.week_ahead_block() == ""
+
+
+def test_southampton_bookers_order_fires_wednesday_and_sunday():
+    """Requested 30 Sep 2026 — Southampton were missing bookers' orders.
+    Southampton only, 13:00, twice a week."""
+    from notify.alerts import load_all
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    L = ZoneInfo("Europe/London")
+    r = next(x for x in load_all() if x.key == "southampton-bookers-order")
+    assert r.enabled
+    assert r.sites == ["tt-southampton"]
+    assert r.route == "site"
+
+    # Sept/Oct 2026: 30th is a Wednesday, 4 Oct a Sunday
+    assert r.due_now(datetime(2026, 9, 30, 13, 0, tzinfo=L))     # Wed
+    assert r.due_now(datetime(2026, 10, 4, 13, 0, tzinfo=L))     # Sun
+    assert not r.due_now(datetime(2026, 10, 1, 13, 0, tzinfo=L)) # Thu
+    assert not r.due_now(datetime(2026, 10, 3, 13, 0, tzinfo=L)) # Sat
+    assert not r.due_now(datetime(2026, 9, 30, 12, 0, tzinfo=L)) # wrong hour
+
+    # exactly twice in a full week, never more
+    fires = [d for d in range(28, 35)
+             if r.due_now(datetime(2026, 9, 28, 13, 0, tzinfo=L).replace(
+                 day=d if d <= 30 else d - 30,
+                 month=9 if d <= 30 else 10))]
+    assert len(fires) == 2, fires
+
+
+def test_bookers_order_wording_is_ajays_not_a_paraphrase():
+    """Ajay supplied this text on 30 Sep 2026 after my first draft missed the
+    point. The 3pm deadline, the WhatsApp route for diced/minced lamb and the
+    Avishek escalation for chops are all operational detail — a tidier rewrite
+    would drop them."""
+    from notify.alerts import load_all
+    m = next(r for r in load_all() if r.key == "southampton-bookers-order").message
+    assert "PLACE BOOKER ORDER BY 3PM" in m
+    assert "diced lamb and minced lamb" in m
+    assert "whats app" in m
+    assert "Avishek" in m
+    assert "lamb chops" in m

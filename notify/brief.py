@@ -89,6 +89,13 @@ def _sport_block(cache: dict) -> str:
     return cache["text"]
 
 
+def _week_ahead_block(cache: dict) -> str:
+    """Next week's key fixtures, fetched at most once per run."""
+    if "week" not in cache:
+        cache["week"] = sport.week_ahead_block()
+    return cache["week"]
+
+
 def run_rule(rule: Rule, sites, zz, args, sport_cache=None) -> tuple[int, int]:
     kind = "reminder" if rule.is_reminder else "alert"
     print(f"\n=== {rule.key} — {rule.title}  [{kind}] ===")
@@ -133,9 +140,14 @@ def run_rule(rule: Rule, sites, zz, args, sport_cache=None) -> tuple[int, int]:
             print(f"  ✗ route '{rule.route}' — no such group in sites.yaml")
             return 0, 1
 
+        cache = sport_cache if sport_cache is not None else {}
         text = rule.render(breaching[0], topic)
         if rule.sport_block:
-            blk = _sport_block(sport_cache if sport_cache is not None else {})
+            blk = _sport_block(cache)
+            if blk:
+                text = f"{text}\n\n{blk}"
+        if rule.week_ahead:
+            blk = _week_ahead_block(cache)
             if blk:
                 text = f"{text}\n\n{blk}"
 
@@ -174,6 +186,11 @@ def run_rule(rule: Rule, sites, zz, args, sport_cache=None) -> tuple[int, int]:
 
         if rule.sport_block:
             block = _sport_block(sport_cache if sport_cache is not None else {})
+            if block:
+                text = f"{text}\n\n{block}"
+
+        if rule.week_ahead:
+            block = _week_ahead_block(sport_cache if sport_cache is not None else {})
             if block:
                 text = f"{text}\n\n{block}"
 

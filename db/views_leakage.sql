@@ -29,6 +29,11 @@ BEGIN;
 --                      for covers/tips, so the two agree.
 -- Score people on attributed_staff; investigate patterns with staff_name.
 --
+-- Sep 2026: reason now falls back to accountDiscountName; added discount_type
+-- (VOID/DISCOUNT/COMP) and counts_as_leakage (FALSE for gift card / deposit /
+-- wastage buttons). New columns are appended at the END so the live view could
+-- be changed with CREATE OR REPLACE without cascading.
+--
 -- Rebuilt (not CREATE OR REPLACE) because attributed_staff is a new column.
 -- CASCADE drops v_staff_eotw_day, which views_eotw.sql recreates later in the
 -- same migrate run -- checked via pg_depend, it is the only dependant.
@@ -66,7 +71,9 @@ SELECT
         WHEN EXTRACT(HOUR FROM (COALESCE(sl.time_of_sale, sa.time_closed) AT TIME ZONE 'Europe/London')) BETWEEN 12 AND 16 THEN 'Lunch (12-5)'
         WHEN EXTRACT(HOUR FROM (COALESCE(sl.time_of_sale, sa.time_closed) AT TIME ZONE 'Europe/London')) BETWEEN 17 AND 21 THEN 'Dinner (5-10)'
         ELSE 'Other' END AS shift,
-    COALESCE(sl.time_of_sale, sa.time_closed) AS tx_time
+    COALESCE(sl.time_of_sale, sa.time_closed) AS tx_time,
+    'VOID'::text AS discount_type,
+    TRUE AS counts_as_leakage
 FROM sales_lines sl
 JOIN sales sa ON sa.business_location_id = sl.business_location_id AND sa.account_reference = sl.account_reference
 LEFT JOIN sites site ON site.business_location_id = sl.business_location_id
@@ -78,7 +85,11 @@ SELECT
     site.nickname,
     sl.account_reference, sl.line_id, sl.name,
     'Discount'::text,
-    COALESCE(NULLIF(sl.raw->>'discountName',''), '(unnamed)'),
+    -- Whole-bill discounts (the vast majority) carry their name in
+    -- accountDiscountName, NOT discountName (item-level only). Before Sep 2026
+    -- only discountName was read, so ~95% of discount £ showed as '(unnamed)'.
+    COALESCE(NULLIF(trim(sl.raw->>'discountName'),''),
+             NULLIF(trim(sl.raw->>'accountDiscountName'),''), '(unnamed)'),
     COALESCE(NULLIF(sl.raw->>'staffName',''), '(unknown)'),
     COALESCE(p.staff, NULLIF(sa.owner_name,''),
              NULLIF(sl.raw->>'staffName',''), '(unknown)'),
@@ -88,7 +99,13 @@ SELECT
         WHEN EXTRACT(HOUR FROM (COALESCE(sl.time_of_sale, sa.time_closed) AT TIME ZONE 'Europe/London')) BETWEEN 12 AND 16 THEN 'Lunch (12-5)'
         WHEN EXTRACT(HOUR FROM (COALESCE(sl.time_of_sale, sa.time_closed) AT TIME ZONE 'Europe/London')) BETWEEN 17 AND 21 THEN 'Dinner (5-10)'
         ELSE 'Other' END,
-    COALESCE(sl.time_of_sale, sa.time_closed)
+    COALESCE(sl.time_of_sale, sa.time_closed),
+    COALESCE(NULLIF(sl.raw->>'discountType',''),
+             NULLIF(sl.raw->>'accountDiscountType',''), 'DISCOUNT'),  -- DISCOUNT / COMP
+    -- Gift cards, deposits and wastage are tender/stock records rung as
+    -- discounts, not money given away -> exclude from leakage totals.
+    NOT (COALESCE(NULLIF(trim(sl.raw->>'discountName'),''), trim(sl.raw->>'accountDiscountName'), '')
+         ~* '(gift card|deposit|wastage)')
 FROM sales_lines sl
 JOIN sales sa ON sa.business_location_id = sl.business_location_id AND sa.account_reference = sl.account_reference
 LEFT JOIN sites site ON site.business_location_id = sl.business_location_id
