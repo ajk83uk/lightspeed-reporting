@@ -118,12 +118,31 @@ INSERT INTO category_rules (dimension, category, match_type, match_value, priori
 -- month (the previous one comes off the menu), so the aggregate never
 -- double-counts. Sanity-check before appending: confirm last month's SKUs have
 -- stopped selling.
---   Aug 2026: Chicken Biriyani (3641), Paneer Biriyani (3646)
---   Sep 2026: Grilled Seabass with chips (3759)
+--
+-- A special can have ONE SKU shared by all 5 sites or a SEPARATE SKU PER SITE --
+-- Lightspeed can't always share a product across locations, so the kitchen
+-- sometimes creates it five times. Always look up every SKU for the dish name
+-- before appending:
+--   SELECT i.sku, s.nickname FROM items i
+--     LEFT JOIN sites s ON s.business_location_id = i.business_location_id
+--    WHERE i.name ILIKE '%<dish>%' ORDER BY s.nickname;
+-- Note that query also returns a row for the non-trading 'Locations Manager'
+-- location; harmless to include (it never has sales), and it future-proofs the
+-- rule if that location is ever mapped to a site.
+--   Aug 2026: Chicken Biriyani (3641), Paneer Biriyani (3646) -- shared SKUs
+--   Sep 2026: Grilled Seabass with chips (3759)               -- shared SKU
+--   Oct 2026: Nilgri Chicken Curry (4519-4524)                -- one SKU PER SITE
 INSERT INTO category_rules (dimension, category, match_type, match_value, priority) VALUES
     ('item_category', 'monthly specials', 'sku', '3641', 30),
     ('item_category', 'monthly specials', 'sku', '3646', 30),
-    ('item_category', 'monthly specials', 'sku', '3759', 30);
+    ('item_category', 'monthly specials', 'sku', '3759', 30),
+    -- Nilgri Chicken Curry, created separately at each site:
+    ('item_category', 'monthly specials', 'sku', '4519', 30),  -- Bournemouth
+    ('item_category', 'monthly specials', 'sku', '4520', 30),  -- Solihull
+    ('item_category', 'monthly specials', 'sku', '4521', 30),  -- Locations Manager (non-trading)
+    ('item_category', 'monthly specials', 'sku', '4522', 30),  -- Portsmouth
+    ('item_category', 'monthly specials', 'sku', '4523', 30),  -- Peterborough
+    ('item_category', 'monthly specials', 'sku', '4524', 30);  -- Southampton
 
 -- LUNCH MENU. The lunch menu is two bowl options — "Curry Bowl" and "Salad Bowl"
 -- — each a normal priced base item with the choice (curry/salad) sitting on a
