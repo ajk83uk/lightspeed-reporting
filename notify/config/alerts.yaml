@@ -485,3 +485,169 @@ rules:
       *Nory sales not syncing — {site_display}*
       No sales figure on {biz_date:date}. Labour % is unusable for this site
       until the feed is fixed.
+
+  # -------------------------------------------------------------------------
+  - key: bookings-briefing
+    enabled: false              # flip to true once the 09:55 FT refresh exists (see description)
+    title: Today's bookings to note — large parties, deposits, guest notes
+    schedule: "0 10 * * *"      # 10:00 UK daily, each site's own chat
+    description: >
+      Tells each site, at 10:00, which of today's bookings need attention:
+      parties of 10+, paid deposits, guest notes (allergies listed first),
+      then a short "Be aware" section for pile-ups.
+
+      Reads the Neon `bookings` table (the Favourite Table GetBookingList
+      pull). `deposit` > 0 is treated as a paid deposit (confirmed by Ajay,
+      3 Oct 2026). Bournemouth Darts & Shuffleboard (FT 2102) has no location
+      id of its own and is folded into Bournemouth here.
+
+      FRESHNESS: the nightly ingest runs ~05:35, so without a refresh just
+      before sending, anything booked after that is missing. Before enabling
+      the schedule, add a `python -m ingest.bookings --date today` step at
+      ~09:55 (needs FT_AUTH_TOKEN on this service).
+
+      Notes are sanitised: braces would break the template renderer and
+      asterisks would bold text in ZenZap. "None", "n/a" etc. are ignored.
+      Be-aware lines: (1) 2+ large parties starting within 60 min of each
+      other; (2) 2+ bookings within 30 min asking for TV / bar / high tables.
+    sql: |
+      WITH today AS (
+        SELECT (now() AT TIME ZONE 'Europe/London')::date AS d
+      ),
+      bm AS (   -- Darts has no location id; it rolls up to Bournemouth (2082)
+        SELECT business_location_id AS loc FROM ft_site_map WHERE ft_site_code = 2082
+      ),
+      raw_bk AS (
+        SELECT COALESCE(b.business_location_id, bm.loc) AS loc,
+               (b.ft_site_code = 2102)                  AS is_darts,
+               b.booking_time, b.guest_count, b.status_code,
+               COALESCE(b.deposit, 0)                   AS deposit,
+               btrim(initcap(COALESCE(b.first_name,'')) || ' ' || initcap(COALESCE(b.last_name,''))) AS guest,
+               NULLIF(btrim(regexp_replace(
+                 replace(replace(replace(replace(COALESCE(b.raw->>'SpecialRequest',''),
+                   E'\n',' '), E'\r',' '), '{','('), '}',')'),
+                 '[*_]', '', 'g')), '')                 AS note0,
+               regexp_replace(regexp_replace(COALESCE(b.raw->>'OfferName',''),
+                 '\s*-\s*£.*$', ''), '\s+', ' ', 'g')   AS offer
+        FROM bookings b CROSS JOIN today t CROSS JOIN bm
+        WHERE b.booking_date = t.d
+          AND b.status_code NOT IN (3, 5)               -- cancelled, no-show
+      ),
+      bk AS (
+        SELECT r.*,
+               CASE WHEN r.note0 IS NULL
+                      OR lower(btrim(r.note0, ' .!-')) IN ('none','n/a','na','nil','no','nothing')
+                    THEN NULL
+                    ELSE left(r.note0, 160) || CASE WHEN length(r.note0) > 160 THEN '…' ELSE '' END
+               END AS note
+        FROM raw_bk r
+      ),
+      fl AS (
+        SELECT bk.*,
+               to_char(booking_time, 'HH24:MI') AS tm,
+               (guest_count >= 10)              AS is_large,
+               (deposit > 0)                    AS has_dep,
+               COALESCE(note ~* '(allerg|gluten|coeliac|celiac|intoleran|lactose|dairy|\mnuts?\M|peanut|shellfish|sesame)', false) AS is_allergy,
+               COALESCE(note ~* '(\mtv\M|telly|screen|\mmatch\M|\msport|view of|bar table|high table|bar area)', false)            AS is_tv,
+               to_char(booking_time, 'HH24:MI') || ' — '
+                 || CASE WHEN guest = '' THEN 'Guest' ELSE guest END || ', '
+                 || guest_count || ' covers'
+                 || CASE WHEN is_darts THEN ' (Darts)' ELSE '' END AS base_txt
+        FROM bk
+      ),
+      lc AS (   -- chain large parties that start within 60 min of the previous one
+        SELECT loc, booking_time, guest_count,
+               SUM(CASE WHEN prev IS NULL OR booking_time - prev > interval '60 minutes' THEN 1 ELSE 0 END)
+                 OVER (PARTITION BY loc ORDER BY booking_time, guest_count) AS cl
+        FROM (SELECT loc, booking_time, guest_count,
+                     lag(booking_time) OVER (PARTITION BY loc ORDER BY booking_time, guest_count) AS prev
+              FROM fl WHERE is_large) x
+      ),
+      lc_txt AS (
+        SELECT loc,
+               string_agg('• ' || SUM_c || ' covers in large parties starting ' || t0 || CASE WHEN t0 <> t1 THEN '–' || t1 ELSE '' END,
+                          E'\n' ORDER BY t0) AS txt
+        FROM (SELECT loc, cl, SUM(guest_count) AS SUM_c, COUNT(*) AS n,
+                     to_char(MIN(booking_time),'HH24:MI') AS t0, to_char(MAX(booking_time),'HH24:MI') AS t1
+              FROM lc GROUP BY loc, cl HAVING COUNT(*) >= 2) z
+        GROUP BY loc
+      ),
+      tc AS (   -- chain TV / bar-table requests that start within 30 min of the previous one
+        SELECT loc, booking_time, guest_count,
+               SUM(CASE WHEN prev IS NULL OR booking_time - prev > interval '30 minutes' THEN 1 ELSE 0 END)
+                 OVER (PARTITION BY loc ORDER BY booking_time, guest_count) AS cl
+        FROM (SELECT loc, booking_time, guest_count,
+                     lag(booking_time) OVER (PARTITION BY loc ORDER BY booking_time, guest_count) AS prev
+              FROM fl WHERE is_tv) x
+      ),
+      tc_txt AS (
+        SELECT loc,
+               string_agg('• ' || SUM_c || ' covers across ' || n || ' bookings asking for TV / bar tables, ' || t0
+                          || CASE WHEN t0 <> t1 THEN '–' || t1 ELSE '' END,
+                          E'\n' ORDER BY t0) AS txt
+        FROM (SELECT loc, cl, SUM(guest_count) AS SUM_c, COUNT(*) AS n,
+                     to_char(MIN(booking_time),'HH24:MI') AS t0, to_char(MAX(booking_time),'HH24:MI') AS t1
+              FROM tc GROUP BY loc, cl HAVING COUNT(*) >= 2) z
+        GROUP BY loc
+      ),
+      agg AS (
+        SELECT s.business_location_id AS loc,
+               COALESCE(SUM(f.guest_count), 0)                                AS tot_covers,
+               COUNT(f.loc)                                                   AS tot_bk,
+               COALESCE(SUM(f.guest_count) FILTER (WHERE f.is_darts), 0)      AS darts_covers,
+               string_agg('• ' || f.base_txt || CASE WHEN f.status_code = 1 THEN ' (not yet confirmed)' ELSE '' END,
+                          E'\n' ORDER BY f.booking_time, f.guest) FILTER (WHERE f.is_large) AS large_txt,
+               string_agg('• ' || f.base_txt
+                          || CASE WHEN f.offer <> '' THEN ', ' || f.offer ELSE '' END
+                          || ', £' || CASE WHEN f.deposit = trunc(f.deposit) THEN trunc(f.deposit)::text
+                                           ELSE to_char(f.deposit, 'FM999990.00') END || ' deposit',
+                          E'\n' ORDER BY f.booking_time, f.guest) FILTER (WHERE f.has_dep) AS dep_txt,
+               string_agg('• ' || f.base_txt || ': "' || f.note || '"',
+                          E'\n' ORDER BY f.booking_time, f.guest) FILTER (WHERE f.is_allergy AND f.note IS NOT NULL) AS allergy_txt,
+               string_agg('• ' || f.base_txt || ': "' || f.note || '"',
+                          E'\n' ORDER BY f.booking_time, f.guest) FILTER (WHERE NOT f.is_allergy AND f.note IS NOT NULL) AS notes_txt
+        FROM ft_site_map s
+        LEFT JOIN fl f ON f.loc = s.business_location_id
+        WHERE s.is_core AND s.ft_site_code <> 2102 AND s.business_location_id IS NOT NULL
+        GROUP BY s.business_location_id
+      )
+      SELECT a.loc::text AS location_id,
+             (SELECT d FROM today) AS today,
+             CASE WHEN a.tot_bk = 0 THEN 'No bookings on the diary yet today.'
+                  ELSE a.tot_covers || ' covers across ' || a.tot_bk || ' bookings'
+                       || CASE WHEN a.darts_covers > 0
+                               THEN ' (' || (a.tot_covers - a.darts_covers) || ' restaurant, '
+                                    || a.darts_covers || ' darts & shuffleboard)'
+                               ELSE '' END
+             END AS headline,
+             concat_ws(E'\n\n',
+               CASE WHEN a.large_txt   IS NOT NULL THEN E'*Large parties (10+)*\n' || a.large_txt END,
+               CASE WHEN a.dep_txt     IS NOT NULL THEN E'*Deposits paid*\n'       || a.dep_txt   END,
+               CASE WHEN a.allergy_txt IS NOT NULL THEN E'*Allergy / dietary*\n'   || a.allergy_txt END,
+               CASE WHEN a.notes_txt   IS NOT NULL THEN E'*Guest notes*\n'         || a.notes_txt END,
+               CASE WHEN lt.txt IS NOT NULL OR tt.txt IS NOT NULL
+                    THEN E'*Be aware*\n' || concat_ws(E'\n', lt.txt, tt.txt) END,
+               CASE
+                 WHEN a.tot_bk > 0 AND a.large_txt IS NULL AND a.dep_txt IS NULL
+                      AND a.allergy_txt IS NULL AND a.notes_txt IS NULL
+                   THEN 'Nothing needing special attention today.'
+                 WHEN a.tot_bk > 0 AND (a.large_txt IS NULL OR a.dep_txt IS NULL
+                      OR (a.allergy_txt IS NULL AND a.notes_txt IS NULL))
+                   THEN 'No ' || regexp_replace(array_to_string(array_remove(ARRAY[
+                          CASE WHEN a.large_txt IS NULL THEN 'large parties' END,
+                          CASE WHEN a.dep_txt   IS NULL THEN 'deposits' END,
+                          CASE WHEN a.allergy_txt IS NULL AND a.notes_txt IS NULL THEN 'guest notes' END
+                        ], NULL), ', '), ', ([^,]*)$', ' or \1') || ' today.'
+               END
+             ) AS body
+      FROM agg a
+      LEFT JOIN lc_txt lt ON lt.loc = a.loc
+      LEFT JOIN tc_txt tt ON tt.loc = a.loc
+      ORDER BY a.loc
+    condition: always           # every site hears something every day, even if only "nothing to note"
+    route: site
+    message: |
+      *{site_display} — bookings to note, {today:date}*
+      {headline}
+
+      {body}
