@@ -65,7 +65,7 @@ def test_config_loads_and_keys_are_unique():
         "daily-site-brief", "labour-hours-over", "labour-hours-saved",
         "labour-pct-over-target", "nory-sales-not-syncing",
         "weekly-sports-bookings", "portsmouth-server-apc",
-        "ft-vs-ls-covers",
+        "ft-vs-ls-covers", "bookings-briefing",
     }
 
 
@@ -484,6 +484,7 @@ APPROVED_SENDERS = {
     "southampton-dishwasher-weekly",  # Wed 15:00, S'ton  (requested 3 Sep 2026)
     "southampton-bookers-order",      # Wed+Sun 13:00, S'ton (req 30 Sep 2026)
     "sunday-preorders-saturday",      # Sat 14:00, all sites (added before 30 Sep 2026)
+    "bookings-briefing",              # daily 10:00, all sites (enabled 3 Oct 2026)
 }
 
 
@@ -664,7 +665,7 @@ def test_daily_rules_are_only_the_ones_asked_for():
              if r.enabled and r.route != "none" and r.schedule
              and r.schedule.split()[2:] == ["*", "*", "*"]]
     assert set(daily) == {"daily-site-brief", "portsmouth-server-apc",
-                          "ft-vs-ls-covers"}, daily
+                          "ft-vs-ls-covers", "bookings-briefing"}, daily
 
 
 # ------------------------------------------------------- live sport block
@@ -1337,3 +1338,67 @@ def test_bookers_order_wording_is_ajays_not_a_paraphrase():
     assert "whats app" in m
     assert "Avishek" in m
     assert "lamb chops" in m
+
+
+# --------------------------------------- bookings briefing + its refresh service
+
+def test_bookings_refresh_command_actually_parses():
+    """The handover specified `--date today`, which raises ValueError —
+    _resolve_dates feeds it to strptime('%Y-%m-%d'). On Railway that would be
+    a crash-looping service, not a refresh. `--days 1` needs no date maths."""
+    import json
+    from ingest.bookings import _resolve_dates
+
+    cfg = json.load(open("railway.bookings-refresh.json"))
+    cmd = cfg["deploy"]["startCommand"]
+    assert "--date today" not in cmd
+    assert cmd == "python -m ingest.bookings --days 1", cmd
+
+    class A:
+        date = None; from_date = None; to_date = None; days = 1; site = None
+    dates = _resolve_dates(A())
+    assert len(dates) == 2                      # yesterday + today
+
+    class Bad:
+        date = "today"; from_date = None; to_date = None; days = None; site = None
+    import pytest
+    with pytest.raises(ValueError):
+        _resolve_dates(Bad())
+
+
+def test_bookings_refresh_runs_before_ten_in_both_bst_and_gmt():
+    """Railway cron is UTC and does not follow the clocks, so one hour would
+    be right for half the year. 8 AND 9 covers both; the redundant run is
+    harmless because the pull upserts."""
+    import json
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    cron = json.load(open("railway.bookings-refresh.json"))["deploy"]["cronSchedule"]
+    assert cron == "30 8,9 * * *", cron
+
+    U, L = ZoneInfo("UTC"), ZoneInfo("Europe/London")
+    for day in ("2026-07-15", "2026-12-15"):          # BST then GMT
+        london = [datetime.fromisoformat(f"{day}T{h:02d}:30")
+                  .replace(tzinfo=U).astimezone(L) for h in (8, 9)]
+        # at least one run lands in the hour before the 10:00 message
+        assert any(8 <= t.hour < 10 for t in london), (day, london)
+
+
+def test_bookings_briefing_flags_stale_data_in_the_message():
+    """ingest/bookings.py returns 0 and merely logs when FT_AUTH_TOKEN is
+    missing, so a half-configured refresh service looks healthy while this
+    message runs on overnight data. The message must say so itself."""
+    from notify.alerts import load_all
+    rule = next(r for r in load_all() if r.key == "bookings-briefing")
+    assert "{freshness}" in rule.message
+    assert "first_seen_at" in rule.sql
+    assert "last refreshed" in rule.sql
+
+
+def test_bookings_briefing_is_live_and_goes_to_each_site():
+    from notify.alerts import load_all
+    rule = next(r for r in load_all() if r.key == "bookings-briefing")
+    assert rule.enabled
+    assert rule.route == "site"
+    assert rule.schedule == "0 10 * * *"

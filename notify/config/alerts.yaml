@@ -488,7 +488,7 @@ rules:
 
   # -------------------------------------------------------------------------
   - key: bookings-briefing
-    enabled: false              # flip to true once the 09:55 FT refresh exists (see description)
+    enabled: true               # refresh service: railway.bookings-refresh.json
     title: Today's bookings to note — large parties, deposits, guest notes
     schedule: "0 10 * * *"      # 10:00 UK daily, each site's own chat
     description: >
@@ -639,7 +639,18 @@ rules:
                           CASE WHEN a.allergy_txt IS NULL AND a.notes_txt IS NULL THEN 'guest notes' END
                         ], NULL), ', '), ', ([^,]*)$', ' or \1') || ' today.'
                END
-             ) AS body
+             ) AS body,
+             -- Freshness guard. ingest/bookings.py RETURNS 0 and only logs a
+             -- warning when FT_AUTH_TOKEN is missing, so a half-configured
+             -- refresh service looks healthy while this message quietly runs
+             -- on last night's data. Surface it in the message instead.
+             (SELECT CASE
+                WHEN max(first_seen_at) < now() - interval '3 hours'
+                  THEN E'\n\n_Booking data last refreshed '
+                       || to_char(max(first_seen_at) AT TIME ZONE 'Europe/London', 'HH24:MI')
+                       || '. Later bookings may be missing — check the diary._'
+                ELSE ''
+              END FROM bookings) AS freshness
       FROM agg a
       LEFT JOIN lc_txt lt ON lt.loc = a.loc
       LEFT JOIN tc_txt tt ON tt.loc = a.loc
@@ -650,4 +661,4 @@ rules:
       *{site_display} — bookings to note, {today:date}*
       {headline}
 
-      {body}
+      {body}{freshness}
