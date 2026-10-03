@@ -1,4 +1,7 @@
 {
+  "_note": "DOCUMENTATION ONLY \u2014 Railway deprecated config-as-code (railway.json) in Oct 2026 and its API now refuses to set a configFile. The bookings-refresh service in project gregarious-art has these values set DIRECTLY on the service instead. Editing this file changes nothing; change the service. Kept because the tests assert these values, so the intended config stays recorded and checked.",
+  "_service": "bookings-refresh (gregarious-art / production)",
+  "_why_two_hours": "Railway cron is UTC and does not follow the clocks. 08:30 UTC is 09:30 London in BST; 09:30 UTC is 09:30 London in GMT. The redundant run is harmless because the bookings pull upserts.",
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
     "builder": "DOCKERFILE",
