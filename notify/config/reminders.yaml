@@ -136,6 +136,20 @@ reminders:
 
       Thank you
 
+  # --- Evening ambience check, every day, one shared group ------------------
+  # Requested 7 Oct 2026. Posts ONCE to Group Announcements (reaches every
+  # site's team). Wording is Ajay's own - do not paraphrase it.
+  - key: evening-ambience-check
+    enabled: true
+    title: Evening lights / temperature / music check
+    schedule: "0 19 * * *"         # every day, 19:00 UK time
+    route: group:announcements     # posts ONCE, to Group Announcements
+    message: |
+      Please check your lights are dimmed sufficiently, the temperature is
+      comfortable, and the music is sufficient
+
+      Thanks
+
   # --- A shared group rather than per-site -----------------------------------
   - key: south-coast-managers-meeting
     enabled: false
