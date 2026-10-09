@@ -65,7 +65,7 @@ def test_config_loads_and_keys_are_unique():
         "daily-site-brief", "labour-hours-over", "labour-hours-saved",
         "labour-pct-over-target", "nory-sales-not-syncing",
         "weekly-sports-bookings", "portsmouth-server-apc",
-        "ft-vs-ls-covers", "bookings-briefing",
+        "ft-vs-ls-covers", "bookings-briefing", "christmas-bookings",
     }
 
 

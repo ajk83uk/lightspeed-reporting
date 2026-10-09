@@ -29,6 +29,7 @@ from . import sentiment_gcs as sentiment_gcs_mod
 from . import sentiment_s3 as sentiment_s3_mod
 from . import nory as nory_mod
 from . import bookings as bookings_mod
+from . import christmas as christmas_mod
 from . import peazi as peazi_mod
 
 logging.basicConfig(
@@ -49,6 +50,8 @@ STEPS = [
     # status changes (Booked -> Show/NoShow/Complete) self-heal. Skips cleanly
     # if FT_AUTH_TOKEN isn't set yet, so it ships dark until the env var lands.
     ("bookings",  lambda: bookings_mod.main([])),
+    # December forward-pull + daily snapshot for the Christmas bookings message.
+    ("christmas", lambda: christmas_mod.main([])),
     ("cashoff",   lambda: cashoff_mod.main([])),
     # Manager's Daily Report (single Google Form sheet, all sites). Latest
     # submission per (site, night) wins on upsert. Skips cleanly if the Google

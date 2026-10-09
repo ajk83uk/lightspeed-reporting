@@ -224,6 +224,96 @@ rules:
       this note once a few clean weeks have passed._
 
 
+  # --- Christmas bookings, daily, head office only --------------------------
+  # Requested 9 Oct 2026. Every non-cancelled booking dined 1-31 Dec, per site,
+  # with the change since the previous morning's snapshot.
+  - key: christmas-bookings
+    enabled: false                 # ships OFF: dry-run first, then flip on
+    title: Christmas bookings (December), day on day
+    schedule: "0 11 * 10-12 *"     # 11:00 daily, Oct-Dec only
+    route: group:head_office
+    description: >
+      Counts every booking with a dine date of 1-31 December that is not
+      cancelled (Bournemouth Darts folded into Bournemouth). Guests = FT
+      GuestCount.
+
+      The day-on-day change is the difference between the two most recent
+      rows in christmas_snapshots, which `ingest.christmas` writes each
+      morning after the 09:30 bookings refresh. FT does not timestamp
+      cancellations, so a snapshot is the only honest way to say "up or down".
+      On the very first day there is no earlier snapshot, so the change is
+      ESTIMATED from booking-made dates (and says so); that estimate ignores
+      anything cancelled since, so treat it as indicative.
+
+      STALENESS: if the snapshot is older than today the message says so
+      rather than quietly reporting old numbers as current.
+    sql: |
+      with latest as (select max(snap_date) as d from christmas_snapshots),
+      prior as (
+        select max(snap_date) as d from christmas_snapshots
+        where snap_date < (select d from latest)
+      ),
+      cur as (select * from christmas_snapshots where snap_date = (select d from latest)),
+      prv as (select * from christmas_snapshots where snap_date = (select d from prior)),
+      est as (   -- first-day fallback: bookings that already existed yesterday
+        select case when site_name = 'Bournemouth (Darts)' then 'Bournemouth' else site_name end as site_name,
+               count(*) as bookings, coalesce(sum(guest_count), 0) as guests
+        from bookings
+        where booking_date between make_date(extract(year from current_date)::int, 12, 1)
+                               and make_date(extract(year from current_date)::int, 12, 31)
+          and status is distinct from 'Cancelled'
+          and (created_on at time zone 'Europe/London')::date < (select d from latest)
+        group by 1
+      ),
+      per_site as (
+        select c.site_name, c.bookings as bk, c.guests as gu,
+               coalesce(p.bookings, e.bookings, 0) as bk_prev,
+               coalesce(p.guests,   e.guests,   0) as gu_prev
+        from cur c
+        left join prv p using (site_name)
+        left join est e using (site_name)
+      )
+      select
+        (select count(*) from prv) = 0                         as first_day,
+        to_char((select d from latest), 'DD Mon')              as as_of,
+        sum(bk)                                                as total_bookings,
+        sum(gu)                                                as total_guests,
+        case when sum(bk) - sum(bk_prev) > 0 then '▲ ' || (sum(bk) - sum(bk_prev))
+             when sum(bk) - sum(bk_prev) < 0 then '▼ ' || abs(sum(bk) - sum(bk_prev))
+             else '—' end                                      as total_bk_chg,
+        case when sum(gu) - sum(gu_prev) > 0 then '▲ ' || (sum(gu) - sum(gu_prev))
+             when sum(gu) - sum(gu_prev) < 0 then '▼ ' || abs(sum(gu) - sum(gu_prev))
+             else '—' end                                      as total_gu_chg,
+        string_agg(
+          format('• *%s*: %s bookings (%s) | %s guests (%s)',
+                 site_name, bk,
+                 case when bk - bk_prev > 0 then '▲ ' || (bk - bk_prev)
+                      when bk - bk_prev < 0 then '▼ ' || abs(bk - bk_prev)
+                      else '—' end,
+                 gu,
+                 case when gu - gu_prev > 0 then '▲ ' || (gu - gu_prev)
+                      when gu - gu_prev < 0 then '▼ ' || abs(gu - gu_prev)
+                      else '—' end),
+          E'\n' order by site_name)                            as site_lines,
+        case
+          when (select d from latest) < (now() at time zone 'Europe/London')::date
+            then E'\n_⚠ Snapshot is from ' || to_char((select d from latest), 'DD Mon')
+                 || ' - today''s refresh has not landed, so these are not today''s numbers._'
+          when (select count(*) from prv) = 0
+            then E'\n_First reading: the change is estimated from booking-made dates and ignores anything cancelled since. Exact from tomorrow._'
+          else '' end                                          as note
+      from per_site
+    condition: always
+    message: |
+      *CHRISTMAS BOOKINGS*
+      1-31 Dec dine dates, vs yesterday's reading. Figures as of {as_of}.
+
+      *Estate:* {total_bookings} bookings ({total_bk_chg}) | {total_guests} guests ({total_gu_chg})
+
+      {site_lines}
+      {note}
+
+
   # --- Portsmouth: per-server APC, for Alice --------------------------------
   - key: portsmouth-server-apc
     enabled: true
