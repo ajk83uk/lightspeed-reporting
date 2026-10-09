@@ -398,9 +398,13 @@ def test_every_enabled_rule_has_a_usable_schedule():
         if not rule.enabled:
             continue
         assert rule.schedule, f"{rule.key} is enabled but has no schedule"
+        # A Monday in August, and a Monday in October (seasonal rules such as
+        # christmas-bookings only run Oct-Dec).
         fires = any(
-            rule.due_now(datetime(2026, 8, 24, h, 0, tzinfo=london))
+            rule.due_now(datetime(2026, m, d, h, mi, tzinfo=london))
+            for (m, d) in ((8, 24), (10, 12))
             for h in range(24)
+            for mi in (0, 15, 30, 45)
         )
         assert fires, f"{rule.key} never fires on a Monday — check its schedule"
 
@@ -485,6 +489,8 @@ APPROVED_SENDERS = {
     "southampton-bookers-order",      # Wed+Sun 13:00, S'ton (req 30 Sep 2026)
     "sunday-preorders-saturday",      # Sat 14:00, all sites (added before 30 Sep 2026)
     "bookings-briefing",              # daily 10:00, all sites (enabled 3 Oct 2026)
+    "evening-ambience-check",         # daily 19:00, group announcements (requested 7 Oct 2026)
+    "christmas-bookings",             # daily 11:00 Oct-Dec, head office (requested 9 Oct 2026)
 }
 
 
@@ -665,7 +671,8 @@ def test_daily_rules_are_only_the_ones_asked_for():
              if r.enabled and r.route != "none" and r.schedule
              and r.schedule.split()[2:] == ["*", "*", "*"]]
     assert set(daily) == {"daily-site-brief", "portsmouth-server-apc",
-                          "ft-vs-ls-covers", "bookings-briefing"}, daily
+                          "ft-vs-ls-covers", "bookings-briefing",
+                          "evening-ambience-check"}, daily
 
 
 # ------------------------------------------------------- live sport block
