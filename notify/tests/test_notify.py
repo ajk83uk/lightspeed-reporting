@@ -1409,3 +1409,15 @@ def test_bookings_briefing_is_live_and_goes_to_each_site():
     assert rule.enabled
     assert rule.route == "site"
     assert rule.schedule == "0 10 * * *"
+
+
+def test_group_external_id_has_no_underscores():
+    """ZenZap 400s on anything but letters, digits and dashes. A group key
+    such as head_office has an underscore; this crashed the first Christmas
+    bookings send on 9 Oct 2026."""
+    import re
+    from notify import brief
+    src = open(brief.__file__, encoding="utf-8").read()
+    assert 're.sub(r"[^A-Za-z0-9-]", "-"' in src
+    assert re.fullmatch(r"[A-Za-z0-9-]+",
+                        re.sub(r"[^A-Za-z0-9-]", "-", "christmas-bookings-20261009-head_office"))

@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -151,7 +152,9 @@ def run_rule(rule: Rule, sites, zz, args, sport_cache=None) -> tuple[int, int]:
             if blk:
                 text = f"{text}\n\n{blk}"
 
-        ext_id = f"{rule.key}-{now:%Y%m%d}-{group}"[:61]
+        # ZenZap rejects anything but letters, digits and dashes - a group key
+        # like "head_office" has an underscore and 400s the whole send.
+        ext_id = re.sub(r"[^A-Za-z0-9-]", "-", f"{rule.key}-{now:%Y%m%d}-{group}")[:61]
         print(f"  (group route — one message, not {len(breaching)})")
 
         if args.dry_run:
