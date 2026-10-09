@@ -752,3 +752,103 @@ rules:
       {headline}
 
       {body}{freshness}
+
+  # -------------------------------------------------------------------------
+  - key: attendance-clock-check
+    enabled: true               # live from 10 Oct 2026 (Ajay approved 9 Oct)
+    title: Attendance — chase missing clock-ins/outs, or say well done
+    schedule: "0 10 * * *"       # 10:00 UK daily, each site's own chat
+    description: >
+      Follows the 07:30 "Rota summary" scheduled task. That task writes
+      yesterday's Nory timecards to nory_shift_variance; this rule reads them
+      back and messages each Tap & Tandoor site's own chat:
+
+        - anyone with NO clock-in or clock-out (record_type missing_punch):
+          "did they work, and what times?"
+        - anyone who clocked in but never clocked out: "what time did they
+          finish?"
+        - a site with at least one worked shift and zero missing punches:
+          "All your team clocked in and out yesterday, well done."
+
+      Requested by Ajay, 9 Oct 2026. Names, roles and rota times are shown;
+      wages are NOT (the chat is visible to the whole site) - they stay in the
+      email. Vita/Zindiya is excluded (not on ZenZap; Vijay still gets the
+      email). Holidays, kitchen placeholders and unscheduled punches never
+      trigger a query.
+
+      FRESHNESS GUARD: sends nothing unless yesterday's rows were (re)loaded
+      in the last 6 hours. If the Rota summary failed, or Nory was down, the
+      sites hear nothing rather than a false "well done". Schedule is one
+      slot (10:00, well after the 07:30 Rota summary and the 08:00 quiet-hours end); if the Rota summary runs
+      late that day, no message goes out - run it by hand with
+      `python -m notify.brief --rule attendance-clock-check`.
+
+      A site only counts as "perfect" if it has shifts on record, so a site
+      with no rows (closed, or a partial load) gets nothing, not praise.
+    sql: |
+      WITH d AS (
+        SELECT ((now() AT TIME ZONE 'Europe/London')::date - 1) AS y
+      ),
+      fresh AS (
+        SELECT 1 AS ok
+        FROM nory_shift_variance n
+        JOIN d ON n.shift_date = d.y
+        WHERE n.loaded_at > now() - interval '6 hours'
+        LIMIT 1
+      ),
+      p AS (
+        -- braces would break the template renderer, asterisks/underscores
+        -- would format text in ZenZap
+        SELECT n.site, n.record_type,
+               initcap(trim(regexp_replace(n.employee_name, '[{}*_]', '', 'g'))) AS nm,
+               trim(regexp_replace(coalesce(n.role, ''), '[{}*_]', '', 'g'))     AS rl,
+               n.sched_start, n.sched_end, n.actual_in, n.actual_out
+        FROM nory_shift_variance n
+        JOIN d ON n.shift_date = d.y
+        WHERE n.site <> 'Vita'
+      ),
+      agg AS (
+        SELECT site,
+               count(*) FILTER (WHERE record_type = 'variance')      AS worked,
+               count(*) FILTER (WHERE record_type = 'missing_punch') AS flagged,
+               string_agg(
+                 '• *' || nm || '*'
+                 || CASE WHEN rl <> '' THEN ' (' || rl || ')' ELSE '' END
+                 || CASE WHEN sched_start IS NOT NULL AND sched_end IS NOT NULL
+                         THEN ', rota ' || to_char(sched_start, 'HH24:MI')
+                              || '–' || to_char(sched_end, 'HH24:MI')
+                         ELSE '' END
+                 || ': ' ||
+                 CASE
+                   WHEN actual_in IS NULL AND actual_out IS NULL
+                     THEN 'no clock-in or clock-out. Did they work this shift? If so, what time did they start and finish?'
+                   WHEN actual_in IS NOT NULL AND actual_out IS NULL
+                     THEN 'clocked in at ' || to_char(actual_in, 'HH24:MI')
+                          || ', no clock-out. What time did they finish?'
+                   WHEN actual_in IS NULL AND actual_out IS NOT NULL
+                     THEN 'clocked out at ' || to_char(actual_out, 'HH24:MI')
+                          || ', no clock-in. What time did they start?'
+                   ELSE 'punch times need checking. What were their start and finish times?'
+                 END,
+                 E'\n' ORDER BY sched_start, nm
+               ) FILTER (WHERE record_type = 'missing_punch') AS lines
+        FROM p
+        GROUP BY site
+      )
+      SELECT a.site AS site_name,
+             (SELECT y::text FROM d) AS shift_date,
+             CASE WHEN a.flagged > 0
+                  THEN 'Please reply in this chat with the answers below so the timesheets can be corrected:'
+                       || E'\n\n' || a.lines
+                  ELSE 'All your team clocked in and out yesterday, well done.'
+             END AS body
+      FROM agg a
+      JOIN fresh ON true
+      WHERE a.flagged > 0 OR a.worked > 0
+      ORDER BY a.site
+    condition: always           # every site with shifts hears something: a query or a well done
+    route: site
+    message: |
+      *Attendance — {site_display}, {shift_date:date}*
+
+      {body}
