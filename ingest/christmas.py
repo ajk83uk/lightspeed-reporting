@@ -19,7 +19,9 @@ snapshot each morning and diffing the two latest is the only honest answer.
 The notify layer is read-only on purpose, so the snapshot is written HERE.
 
 Counted: every booking with a dine date 1-31 December that is not Cancelled.
-Guests = FT GuestCount. Bournemouth Darts is folded into Bournemouth.
+Guests = FT GuestCount. Bournemouth Darts & Shuffleboard (FT code 2102) is
+EXCLUDED entirely (13 Oct 2026): a group can book darts AND dining, which
+double-counts covers.
 
 Run:
     python -m ingest.christmas                  # pull December + snapshot
@@ -45,7 +47,7 @@ log = logging.getLogger("ingest.christmas")
 DDL = """
 CREATE TABLE IF NOT EXISTS christmas_snapshots (
     snap_date  date        NOT NULL,   -- London date the snapshot was taken
-    site_name  text        NOT NULL,   -- reporting site (Darts folded into Bournemouth)
+    site_name  text        NOT NULL,   -- reporting site (Darts excluded)
     bookings   integer     NOT NULL,
     guests     integer     NOT NULL,
     taken_at   timestamptz NOT NULL DEFAULT now(),
@@ -62,12 +64,12 @@ SELECT (now() AT TIME ZONE 'Europe/London')::date,
        count(b.booking_ref_no),
        COALESCE(sum(b.guest_count), 0),
        now()
-FROM (SELECT DISTINCT CASE WHEN site_name = 'Bournemouth (Darts)'
-                           THEN 'Bournemouth' ELSE site_name END AS site_name
-        FROM ft_site_map) s
+FROM (SELECT DISTINCT site_name
+        FROM ft_site_map
+       WHERE site_name <> 'Bournemouth (Darts)') s
 LEFT JOIN bookings b
-       ON CASE WHEN b.site_name = 'Bournemouth (Darts)'
-               THEN 'Bournemouth' ELSE b.site_name END = s.site_name
+       ON b.site_name = s.site_name
+      AND b.ft_site_code <> 2102
       AND b.booking_date BETWEEN %(start)s AND %(end)s
       AND b.status IS DISTINCT FROM 'Cancelled'
 GROUP BY s.site_name

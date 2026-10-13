@@ -234,8 +234,9 @@ rules:
     route: group:head_office
     description: >
       Counts every booking with a dine date of 1-31 December that is not
-      cancelled (Bournemouth Darts folded into Bournemouth). Guests = FT
-      GuestCount.
+      cancelled. Bournemouth Darts & Shuffleboard (FT code 2102) is EXCLUDED
+      entirely (13 Oct 2026) because a group can book darts and dining, which
+      double-counts covers. Guests = FT GuestCount.
 
       The day-on-day change is the difference between the two most recent
       rows in christmas_snapshots, which `ingest.christmas` writes each
@@ -256,12 +257,13 @@ rules:
       cur as (select * from christmas_snapshots where snap_date = (select d from latest)),
       prv as (select * from christmas_snapshots where snap_date = (select d from prior)),
       est as (   -- first-day fallback: bookings that already existed yesterday
-        select case when site_name = 'Bournemouth (Darts)' then 'Bournemouth' else site_name end as site_name,
+        select site_name,
                count(*) as bookings, coalesce(sum(guest_count), 0) as guests
         from bookings
         where booking_date between make_date(extract(year from current_date)::int, 12, 1)
                                and make_date(extract(year from current_date)::int, 12, 31)
           and status is distinct from 'Cancelled'
+          and ft_site_code <> 2102   -- darts/shuffleboard excluded entirely
           and (created_on at time zone 'Europe/London')::date < (select d from latest)
         group by 1
       ),
