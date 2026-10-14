@@ -53,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     # safe to re-run on an existing DB and builds a fresh DB (e.g. zindiya)
     # completely. (Previously views_staff/views_eotw/the patch were applied by
     # hand on the T&T DB, which broke fresh-DB migrations at views_plates.)
-    files = ["schema.sql", "bookings_schema.sql", "storekit_schema.sql",
+    files = ["schema.sql", "bookings_schema.sql", "storekit_schema.sql", "como_schema.sql",
              "peazi_schema.sql", "manager_report_schema.sql",
              "views.sql", "patch_line_staff_and_payment_method.sql",
              "views_leakage.sql",
@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
              "views_booking_pace.sql", "views_staff.sql", "views_eotw.sql",
              "views_plates.sql", "views_storekit.sql",
              "views_storekit_lightspeed.sql", "views_kitchen.sql",
-             "views_manager_report.sql"]
+             "views_manager_report.sql", "views_como.sql", "grants_como.sql"]
     if not args.no_seed:
         files.append("seed_categories.sql")
 

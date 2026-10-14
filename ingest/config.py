@@ -181,6 +181,18 @@ class Settings:
     # Set to "1" only for local testing to skip signature verification.
     storekit_skip_verify: bool = os.getenv("STOREKIT_SKIP_VERIFY", "") == "1"
 
+    # --- Como loyalty (Export Event webhooks) ------------------------------
+    # Receiver: ingest/como_webhook.py (own always-on Railway web service).
+    # Como documents no signature scheme, so the URL carries a secret token
+    # (/webhooks/como/<token>); no token -> every request 404s (fail closed).
+    # .strip() for the same pasted-trailing-newline trap as the other secrets.
+    como_webhook_token: str = os.getenv("COMO_WEBHOOK_TOKEN", "").strip()
+    # Salt for the email/phone hashes used to match members to FT bookings.
+    # NEVER change once set -- existing hashes would stop matching.
+    como_hash_salt: str = os.getenv("COMO_HASH_SALT", "").strip()
+    # OFF by default: receiver only logs a dry-run line. Set COMO_ENABLED=1 to store.
+    como_enabled: bool = os.getenv("COMO_ENABLED", "").strip() == "1"
+
     # --- Ingestion behaviour ----------------------------------------------
     # How many days back a "full" backfill goes when there's no watermark.
     backfill_days: int = int(os.getenv("LS_BACKFILL_DAYS", "365"))
