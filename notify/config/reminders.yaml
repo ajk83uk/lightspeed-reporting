@@ -150,6 +150,25 @@ reminders:
 
       Thanks
 
+  # --- Solihull porter: cellar tidy, every day ------------------------------
+  # Requested 14 Oct 2026 (REQ-0013). Solihull's own chat only. Wording is
+  # Ajay's own, approved 14 Oct 10:50 - do not paraphrase it. Ships OFF:
+  # dry-run, then Ajay approves, pushes and flips enabled to true.
+  - key: solihull-porter-cellar-daily
+    enabled: false                 # flip to true once Ajay approves
+    title: Solihull porter - cellar tidy
+    schedule: "0 15 * * *"         # every day, 15:00 UK time
+    sites: [tt-solihull]
+    route: site                    # Solihull's own chat only
+    message: |
+      Good afternoon. Porter, please go down to the cellar today and:
+
+      1. Clear the cardboard
+      2. Wipe the floor
+      3. Tidy up the cellar
+
+      Thanks!
+
   # --- A shared group rather than per-site -----------------------------------
   - key: south-coast-managers-meeting
     enabled: false
