@@ -119,3 +119,27 @@ CREATE INDEX IF NOT EXISTS idx_como_red_at ON como_redemptions (redeemed_at);
 
 -- Tie Como into the master site dimension (mirrors storekit_venue_id).
 ALTER TABLE sites ADD COLUMN IF NOT EXISTS como_branch_id text;
+
+
+-- ---- 14 Oct 2026: additions after the first live events -------------------
+-- Sign-ups DO carry a home branch (Membership.HomeBranchID, a name e.g. 'Peterborough').
+ALTER TABLE como_members ADD COLUMN IF NOT EXISTS home_branch text;
+-- Purchases carry Cancelled / IsCancellation flags.
+ALTER TABLE como_transactions ADD COLUMN IF NOT EXISTS cancelled boolean;
+ALTER TABLE como_transactions ADD COLUMN IF NOT EXISTS is_cancellation boolean;
+
+-- Line items per loyalty purchase (what the guest ordered). Pence, as sent.
+CREATE TABLE IF NOT EXISTS como_transaction_items (
+    purchase_uid    text NOT NULL,
+    line_id         text NOT NULL,
+    item_code       text,
+    item_name       text,
+    department_code text,
+    department_name text,
+    quantity        integer,
+    price_pence     integer,
+    gross_pence     integer,
+    action          text,
+    PRIMARY KEY (purchase_uid, line_id)
+);
+CREATE INDEX IF NOT EXISTS como_items_name_idx ON como_transaction_items (item_name);

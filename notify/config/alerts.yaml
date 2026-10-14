@@ -316,6 +316,108 @@ rules:
       {note}
 
 
+  # --- Como loyalty, daily, head office only --------------------------------
+  # Requested 14 Oct 2026. Yesterday's new loyalty sign-ups and benefit/voucher
+  # redemptions, from the Como webhook tables. SHIPS DISABLED: dry-run, approve,
+  # then flip enabled.
+  - key: como-loyalty-daily
+    enabled: false                 # switched off until Ajay approves the dry-run
+    title: Como loyalty - yesterday's sign-ups and redemptions
+    schedule: "0 10 * * *"         # 10:00 daily
+    route: group:head_office
+    description: >
+      Yesterday (UK calendar day): new Como sign-ups (estate total plus a split by
+      the member's home branch, from the joinedclub event), benefits/vouchers redeemed with the
+      value given, and a per-site split of redemptions. Day-on-day change is
+      shown only when the previous day has events (Como is forward-only from
+      19:30 BST on 14 Oct 2026, so 14 Oct is a part-day).
+
+      A staleness line fires if no Como event of any kind has arrived in 24h,
+      which usually means the webhook, not trade.
+
+      NOT YET VERIFIED on live events: BranchID format vs como_site_map
+      (unmapped branches show as 'Unmapped (id)') and applied_pence on redeem
+      events (value may read 0 until confirmed).
+    sql: |
+      with y as (select ((now() at time zone 'Europe/London')::date - 1) as d),
+      su as (
+        select signup_date as d, sum(signups) as n,
+               sum(sms_optin) as sms, sum(email_optin) as em
+        from v_como_signups_daily group by 1
+      ),
+      ss as (
+        select signup_date as d, first_purchase_site as site, sum(signups) as n
+        from v_como_signups_daily group by 1, 2
+      ),
+      rd as (
+        select business_date as d, sum(redemptions) as n,
+               coalesce(sum(value_given), 0) as val
+        from v_como_redemptions_daily group by 1
+      ),
+      rt as (
+        select business_date as d, asset_type, sum(redemptions) as n
+        from v_como_redemptions_daily group by 1, 2
+      ),
+      rs as (
+        select business_date as d, site, sum(redemptions) as n
+        from v_como_redemptions_daily group by 1, 2
+      ),
+      ev as (select max(received_at) as last_at, count(*) as total from como_events)
+      select
+        to_char((select d from y), 'Dy DD Mon')                          as day_label,
+        coalesce((select n from su where d = (select d from y)), 0)      as signups,
+        coalesce((select sms from su where d = (select d from y)), 0)    as sms_optin,
+        coalesce((select em from su where d = (select d from y)), 0)     as email_optin,
+        case when not exists (select 1 from su where d = (select d from y) - 1) then ''
+             when coalesce((select n from su where d = (select d from y)),0)
+                - (select n from su where d = (select d from y) - 1) > 0
+               then ' (▲ ' || (coalesce((select n from su where d = (select d from y)),0)
+                - (select n from su where d = (select d from y) - 1)) || ')'
+             when coalesce((select n from su where d = (select d from y)),0)
+                - (select n from su where d = (select d from y) - 1) < 0
+               then ' (▼ ' || abs(coalesce((select n from su where d = (select d from y)),0)
+                - (select n from su where d = (select d from y) - 1)) || ')'
+             else ' (—)' end                                              as signup_chg,
+        coalesce((select n from rd where d = (select d from y)), 0)      as redeemed,
+        to_char(coalesce((select val from rd where d = (select d from y)), 0), 'FM£999,990.00') as value_given,
+        case when not exists (select 1 from rd where d = (select d from y) - 1) then ''
+             when coalesce((select n from rd where d = (select d from y)),0)
+                - (select n from rd where d = (select d from y) - 1) > 0
+               then ' (▲ ' || (coalesce((select n from rd where d = (select d from y)),0)
+                - (select n from rd where d = (select d from y) - 1)) || ')'
+             when coalesce((select n from rd where d = (select d from y)),0)
+                - (select n from rd where d = (select d from y) - 1) < 0
+               then ' (▼ ' || abs(coalesce((select n from rd where d = (select d from y)),0)
+                - (select n from rd where d = (select d from y) - 1)) || ')'
+             else ' (—)' end                                              as redeemed_chg,
+        coalesce((select string_agg(site || ' ' || n, ' · ' order by n desc)
+                  from ss where d = (select d from y)), 'none')           as signups_by_site,
+        coalesce((select string_agg(coalesce(asset_type,'other') || ' ' || n, ' · ' order by n desc)
+                  from rt where d = (select d from y)), 'none')           as by_type,
+        coalesce((select string_agg(site || ' ' || n, ' · ' order by n desc)
+                  from rs where d = (select d from y)), 'none')           as by_site,
+        case
+          when (select total from ev) = 0
+            then E'\n_⚠ No Como events have ever been received. Check the webhook._'
+          when (select last_at from ev) < now() - interval '24 hours'
+            then E'\n_⚠ No Como events received in the last 24h (last: '
+                 || to_char((select last_at from ev) at time zone 'Europe/London', 'DD Mon HH24:MI')
+                 || '). That usually means the webhook, not trade._'
+          when (select d from y) < date '2026-10-15'
+            then E'\n_Como went live at 19:30 on 14 Oct, so this is a part-day. No history before then._'
+          else '' end                                                     as note
+    condition: always
+    message: |
+      *LOYALTY (COMO)* - {day_label}
+
+      *New sign-ups:* {signups}{signup_chg}  (SMS opt-in {sms_optin} | email opt-in {email_optin})
+      Sign-ups by home site: {signups_by_site}
+      *Benefits redeemed:* {redeemed}{redeemed_chg} | value given {value_given}
+      By type: {by_type}
+      By site: {by_site}
+      {note}
+
+
   # --- Portsmouth: per-server APC, for Alice --------------------------------
   - key: portsmouth-server-apc
     enabled: true

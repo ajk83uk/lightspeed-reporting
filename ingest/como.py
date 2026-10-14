@@ -31,6 +31,9 @@ _PII_KEYS = {
     "email", "phonenumber", "phone", "firstname", "lastname", "fullname", "name_",
     "birthday", "dateofbirth", "birthdate", "address", "city", "zip", "zipcode",
     "street", "gender", "membershipurl", "businesslogo",
+    # seen in real payloads (14 Oct 2026): credentials, postcode, birthday, staff name
+    "apikey", "api-key", "token", "addresszipcode", "birthdaymonth",
+    "birthdaymonthandday", "cashier", "phonenumberhash",
 }
 
 
@@ -124,8 +127,8 @@ ON CONFLICT (event_id) DO NOTHING;"""
 _SQL_MEMBER = """
 INSERT INTO como_members (membership_key,como_member_id,registered_at,registration_source,
     status,consent,allow_sms,allow_email,points,budget_weighted,tags,email_hash,phone_hash,
-    joined_event_at,last_event,last_event_at)
-VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    joined_event_at,last_event,last_event_at,home_branch)
+VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
 ON CONFLICT (membership_key) DO UPDATE SET
     como_member_id = COALESCE(EXCLUDED.como_member_id, como_members.como_member_id),
     registered_at  = COALESCE(como_members.registered_at, EXCLUDED.registered_at),
@@ -133,6 +136,7 @@ ON CONFLICT (membership_key) DO UPDATE SET
     email_hash = COALESCE(EXCLUDED.email_hash, como_members.email_hash),
     phone_hash = COALESCE(EXCLUDED.phone_hash, como_members.phone_hash),
     joined_event_at = COALESCE(como_members.joined_event_at, EXCLUDED.joined_event_at),
+    home_branch = COALESCE(como_members.home_branch, EXCLUDED.home_branch),
     -- state fields: only a NEWER (or equal) event may overwrite them
     status  = CASE WHEN EXCLUDED.last_event_at >= COALESCE(como_members.last_event_at,'-infinity')
                    THEN COALESCE(EXCLUDED.status, como_members.status) ELSE como_members.status END,
@@ -159,10 +163,19 @@ UPDATE como_members SET first_branch_id = %s, updated_at = now()
 
 _SQL_TX = """
 INSERT INTO como_transactions (purchase_uid,event_id,membership_key,branch_id,transaction_id,
-    pos_id,source,total_pence,relative_sum_pence,num_members,currency,purchased_at)
-VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-ON CONFLICT (purchase_uid) DO NOTHING;"""
+    pos_id,source,total_pence,relative_sum_pence,num_members,currency,purchased_at,
+    cancelled,is_cancellation)
+VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+ON CONFLICT (purchase_uid) DO UPDATE SET     -- a later cancellation flags the original
+    cancelled = COALESCE(como_transactions.cancelled,false) OR COALESCE(EXCLUDED.cancelled,false),
+    is_cancellation = COALESCE(como_transactions.is_cancellation,false) OR COALESCE(EXCLUDED.is_cancellation,false);
 
+"""
+_SQL_ITEM = """
+INSERT INTO como_transaction_items (purchase_uid,line_id,item_code,item_name,department_code,
+    department_name,quantity,price_pence,gross_pence,action)
+VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+ON CONFLICT (purchase_uid,line_id) DO NOTHING;"""
 _SQL_RED = """
 INSERT INTO como_redemptions (redemption_id,event_id,membership_key,branch_id,transaction_id,
     asset_key,asset_name,asset_type,applied_pence,result,redeemed_at)
@@ -176,6 +189,19 @@ def summarise(payload: dict) -> str:
     ua = d.get("UserAction") or {}
     return (f"trigger={payload.get('Trigger')} branch={_branch(d)} "
             f"total={d.get('TotalSum')} tx={ua.get('TransactionID') or (ua.get('Data') or {}).get('TransactionID')}")
+
+
+def _purchase_items(data: dict, ua_data: dict) -> list:
+    """Line items live at Data.Purchase.Data.Items in real payloads."""
+    for src in ((data.get("Purchase") or {}).get("Data"), ua_data):
+        if isinstance(src, dict) and isinstance(src.get("Items"), list):
+            return src["Items"]
+    return []
+
+
+def _purchase_data(data: dict, ua_data: dict) -> dict:
+    pd = (data.get("Purchase") or {}).get("Data")
+    return pd if isinstance(pd, dict) else (ua_data if isinstance(ua_data, dict) else {})
 
 
 def store_event(conn, payload: dict, raw: bytes) -> dict:
@@ -216,10 +242,12 @@ def store_event(conn, payload: dict, raw: bytes) -> dict:
                 eh, ph,
                 event_at if trigger.lower() == "joinedclub" else None,
                 trigger, event_at or datetime.now(timezone.utc),
+                membership.get("HomeBranchID") or None,
             ))
             counts["member"] = 1
 
         if trigger.lower() == "purchase":
+            pdata = _purchase_data(data, ua_data)
             total = _int(data.get("TotalSum") if data.get("TotalSum") is not None else ua_data.get("TotalSum"))
             cur.execute(_SQL_TX, (
                 ua.get("PurchaseUID") or eid, eid, mkey, branch,
@@ -231,8 +259,19 @@ def store_event(conn, payload: dict, raw: bytes) -> dict:
                 _int(data.get("NumOfMembers")),
                 data.get("CurrencyIsoCode"),
                 event_at or _como_dt(data.get("TimeStamp")),
+                _bool(pdata.get("Cancelled")), _bool(pdata.get("IsCancellation")),
             ))
             counts["tx"] = cur.rowcount
+            puid = ua.get("PurchaseUID") or eid
+            for n, it in enumerate(_purchase_items(data, ua_data)):
+                if not isinstance(it, dict):
+                    continue
+                cur.execute(_SQL_ITEM, (
+                    puid, str(it.get("LineID") or n), it.get("ItemCode"), it.get("ItemName"),
+                    it.get("DepartmentCode"), it.get("DepartmentName"),
+                    _int(it.get("Quantity")), _int(it.get("Price")), _int(it.get("GrossPrice")),
+                    it.get("Action"),
+                ))
             if mkey and branch:
                 cur.execute(_SQL_FIRST_BRANCH, (branch, mkey))
 
