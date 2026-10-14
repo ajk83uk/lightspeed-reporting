@@ -321,7 +321,7 @@ rules:
   # redemptions, from the Como webhook tables. SHIPS DISABLED: dry-run, approve,
   # then flip enabled.
   - key: como-loyalty-daily
-    enabled: false                 # switched off until Ajay approves the dry-run
+    enabled: true                  # live from 15 Oct 2026 (Ajay approved 14 Oct, 10:00 daily)
     title: Como loyalty - yesterday's sign-ups and redemptions
     schedule: "0 10 * * *"         # 10:00 daily
     route: group:head_office
