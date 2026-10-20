@@ -224,6 +224,169 @@ rules:
       this note once a few clean weeks have passed._
 
 
+  # --- 2 for £15 cocktails, weekly, head office only ------------------------
+  # Requested 17 Oct 2026. Promo launched Thu 15 Oct 2026 (SKUs 4550-4570 and
+  # 4691, named "2 x <cocktail>", one bundle = two drinks at £15). SHIPS
+  # DISABLED: dry-run, approve, then flip enabled.
+  - key: cocktail-2for15-weekly
+    enabled: true                  # approved 20 Oct 2026; first send Mon 26 Oct 11:00
+    title: 2 for £15 cocktails, weekly
+    schedule: "0 11 * * 1"         # Mondays 11:00 UK, prior Mon-Sun
+    route: group:head_office
+    description: >
+      Measures the 2 for £15 cocktail promotion. Bundles and £ per site, total
+      cocktail drinks and £ against the same weekdays in the three full weeks
+      before launch (Mon 21 Sep to Sun 11 Oct 2026), and cocktail drinks per
+      100 dining covers.
+
+      The launch week is partial (promo started Thursday), so the report week
+      and the baseline are cut to the same weekdays and the message says so.
+
+      Drinks = single cocktails at menu price + 2 x old 2-4-1 bundles + 2 x
+      2-for-15 bundles. Zero-priced bottomless serves are not counted.
+      Singles use the SKU list behind v_drinks_cocktails, so a cocktail added
+      to the menu later will not count until it is added there.
+
+      Covers are dining covers from v_covers_clean (darts and shuffleboard
+      excluded). Costs, GP and margin are John's remit and are deliberately
+      not shown.
+    sql: |
+      with t as (select (now() at time zone 'Europe/London')::date as today),
+      b as (
+        select today,
+               (date_trunc('week', today)::date - 7) as wk_start,
+               (date_trunc('week', today)::date - 1) as wk_end,
+               date '2026-10-15' as launch
+        from t
+      ),
+      b2 as (
+        select *, greatest(wk_start, launch) as pf,
+               (date_trunc('week', launch)::date - 21) as bl_start,
+               (date_trunc('week', launch)::date - 1)  as bl_end
+        from b
+      ),
+      dows as (
+        select distinct extract(isodow from g)::int as dow
+        from b2, generate_series(b2.pf, b2.wk_end, interval '1 day') g
+      ),
+      sites(loc, nm, ord) as (values
+        ('1718940401139720','Solihull',1), ('1718940401139718','Portsmouth',2),
+        ('1718940401139717','Southampton',3), ('1718940401139719','Peterborough',4),
+        ('1718940401139714','Bournemouth',5)),
+      ln as (
+        select r.business_location_id::text as loc, r.business_date as d,
+          case when r.sku::text ~ '^(455[0-9]|456[0-9]|4570|4691)$' and r.name ilike '2 x %' then 'promo'
+               when r.sku::text in ('665','666','667') then 'old'
+               when r.sku::text in ('55','445','57','58','447','59','60','448','61','62','63','452','64','453','65','56','446','391','392','393','450','394','451','395','312','510','550','551','544','545','250')
+                    and s.menu_list_price <> 0 then 'single' end as kind,
+          r.quantity as q, r.net_inc_vat as n
+        from v_report_lines r
+        join sales_lines s on s.business_location_id = r.business_location_id
+                          and s.account_reference = r.account_reference
+                          and s.line_id = r.line_id
+        where r.business_date between (select bl_start from b2) and (select wk_end from b2)
+      ),
+      wk as (
+        select loc,
+          coalesce(sum(q) filter (where kind='promo'),0) as bundles,
+          coalesce(sum(q*2) filter (where kind in ('promo','old')),0)
+            + coalesce(sum(q) filter (where kind='single'),0) as drinks,
+          coalesce(sum(q) filter (where kind='single'),0) as singles,
+          coalesce(sum(q*2) filter (where kind='old'),0) as old241,
+          coalesce(sum(n) filter (where kind is not null),0) as net
+        from ln where d between (select pf from b2) and (select wk_end from b2) group by loc
+      ),
+      bs as (
+        select loc,
+          (coalesce(sum(q*2) filter (where kind in ('promo','old')),0)
+            + coalesce(sum(q) filter (where kind='single'),0)) / 3.0 as drinks,
+          coalesce(sum(q) filter (where kind='single'),0) / 3.0 as singles,
+          coalesce(sum(q*2) filter (where kind='old'),0) / 3.0 as old241,
+          coalesce(sum(n) filter (where kind is not null),0) / 3.0 as net
+        from ln
+        where d between (select bl_start from b2) and (select bl_end from b2)
+          and extract(isodow from d)::int in (select dow from dows)
+        group by loc
+      ),
+      cw as (
+        select business_location_id::text as loc,
+               sum(nb_covers) filter (where is_dining_check) as cv
+        from v_covers_clean
+        where biz_date between (select pf from b2) and (select wk_end from b2) group by 1
+      ),
+      cb as (
+        select business_location_id::text as loc,
+               sum(nb_covers) filter (where is_dining_check) / 3.0 as cv
+        from v_covers_clean
+        where biz_date between (select bl_start from b2) and (select bl_end from b2)
+          and extract(isodow from biz_date)::int in (select dow from dows) group by 1
+      ),
+      per as (
+        select s.nm, s.ord,
+          coalesce(w.bundles,0) as bundles, coalesce(w.net,0) as net, coalesce(bs.net,0) as bnet,
+          coalesce(w.drinks,0) as drinks, coalesce(bs.drinks,0) as bdrinks,
+          coalesce(w.singles,0) as singles, coalesce(bs.singles,0) as bsingles,
+          coalesce(w.old241,0) as old241, coalesce(bs.old241,0) as bold,
+          coalesce(cw.cv,0) as cv, coalesce(cb.cv,0) as bcv
+        from sites s
+        left join wk w on w.loc = s.loc left join bs on bs.loc = s.loc
+        left join cw on cw.loc = s.loc left join cb on cb.loc = s.loc
+      ),
+      tot as (
+        select sum(bundles) as bundles, sum(net) as net, sum(bnet) as bnet,
+               sum(drinks) as drinks, sum(bdrinks) as bdrinks,
+               sum(singles) as singles, sum(bsingles) as bsingles,
+               sum(old241) as old241, sum(bold) as bold,
+               sum(cv) as cv, sum(bcv) as bcv
+        from per
+      )
+      select
+        to_char((select wk_start from b2), 'DD Mon') as wk_start,
+        to_char((select wk_end from b2), 'DD Mon')   as wk_end,
+        case when (select pf from b2) > (select wk_start from b2)
+          then 'Promo days only: ' || to_char((select pf from b2), 'Dy DD Mon') || ' to '
+               || to_char((select wk_end from b2), 'Dy DD Mon')
+               || ', against the same weekdays averaged over the 3 weeks before launch'
+          else 'Full week, against the average of the 3 weeks before launch (21 Sep to 11 Oct)' end as scope,
+        (select bundles from tot)::int as bundles,
+        to_char((select net from tot), 'FM£999,990') as net,
+        round((select drinks from tot))::int as drinks,
+        round((select bdrinks from tot))::int as bdrinks,
+        case when (select drinks - bdrinks from tot) >= 0 then '▲ ' else '▼ ' end
+          || abs(round((select drinks - bdrinks from tot)))::int as drinks_chg,
+        to_char((select bnet from tot), 'FM£999,990') as bnet,
+        case when (select net - bnet from tot) >= 0 then '▲ ' else '▼ ' end
+          || to_char(abs((select net - bnet from tot)), 'FM£999,990') as net_chg,
+        round((select singles from tot))::int as singles,
+        round((select bsingles from tot))::int as bsingles,
+        round((select old241 from tot))::int as old241,
+        round((select bold from tot))::int as bold,
+        coalesce(round(100.0 * (select drinks from tot) / nullif((select cv from tot),0))::text, 'n/a') as dpc,
+        coalesce(round(100.0 * (select bdrinks from tot) / nullif((select bcv from tot),0))::text, 'n/a') as bdpc,
+        (select string_agg(
+           format('• %-12s %s bundles | %s drinks (usual %s) %s | %s (usual %s)',
+             nm, bundles::int, round(drinks)::int, round(bdrinks)::int,
+             case when drinks - bdrinks >= 0 then '▲' || round(drinks - bdrinks)::int
+                  else '▼' || abs(round(drinks - bdrinks))::int end,
+             to_char(net, 'FM£999,990'), to_char(bnet, 'FM£999,990')),
+           E'\n' order by ord) from per) as site_lines,
+        case when (select pf from b2) > (select wk_start from b2)
+          then E'\n_Launch week, so a part-week and a small sample._' else '' end as note
+    condition: always
+    message: |
+      *2 FOR £15 COCKTAILS* - w/c {wk_start} ({wk_start} to {wk_end})
+      {scope}
+
+      Estate: {bundles} bundles, {net} cocktail sales ({net_chg} on usual {bnet})
+      Cocktail drinks: {drinks} against {bdrinks} usual ({drinks_chg})
+      Per 100 dining covers: {dpc} against {bdpc} usual
+
+      {site_lines}
+
+      Swap check: single cocktails {singles} (usual {bsingles}), old 2-4-1 drinks {old241} (usual {bold}).
+      {note}
+
+
   # --- Christmas bookings, daily, head office only --------------------------
   # Requested 9 Oct 2026. Every non-cancelled booking dined 1-31 Dec, per site,
   # with the change since the previous morning's snapshot.
