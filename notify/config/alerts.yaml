@@ -581,6 +581,102 @@ rules:
       {note}
 
 
+  # --- Desserts, daily, head office only ------------------------------------
+  # Requested 22 Oct 2026. Yesterday's dessert sales by site, week to date, top
+  # sellers. SHIPS DISABLED: dry-run, approve, then flip enabled.
+  - key: dessert-daily
+    enabled: true                  # live from 23 Oct 2026 (Ajay approved 22 Oct, 10:00 daily)
+    title: Desserts - yesterday's sales by site
+    schedule: "0 10 * * *"         # 10:00 daily, previous UK trading day
+    route: group:head_office
+    description: >
+      Yesterday (UK calendar day) dessert portions sold and value per site,
+      estate total with change on the day before, week to date (Mon to
+      yesterday) and the top three sellers this week.
+
+      Dessert set = the seven SKUs Ajay named on 22 Oct 2026 (4714 Cherry &
+      Chocolate Torte, 4720 Chocolate & Orange Brownie, 331 Sticky Toffee
+      Pudding, 4739 Pistachio Ice Cream, 4740 Mango Ice Cream, 306 Vanilla
+      Ice Cream, 3764 Gulab Jamun) PLUS the existing desserts matched by name
+      (brownie torte, cheesecakes, scoops, sundae, rasmalai, kulfi, kheer).
+
+      EXCLUDED: kids' items (free, would inflate counts) and the '1 scoop'
+      line (SKU 4721). Ice cream is a sequence item: the flavour line is the
+      portion, '1 scoop' is a companion price line and would double count.
+      Lines are summed signed, so voids and re-rings net out.
+
+      As at 22 Oct only 306 and 3764 had ever sold; the other five SKUs had
+      not rung through, so expect near-empty days until they go live.
+
+      Sites joined on business_location_id. A warning line fires if yesterday's
+      sales have not landed for all 5 sites. Bournemouth Darts is a bookings
+      code only and has no till, so it is not listed.
+    sql: |
+      with y as (select ((now() at time zone 'Europe/London')::date - 1) as d),
+      sites(id, site, ord) as (values
+        (1718940401139720::bigint, 'Solihull', 1), (1718940401139719::bigint, 'Peterborough', 2),
+        (1718940401139718::bigint, 'Portsmouth', 3), (1718940401139717::bigint, 'Southampton', 4),
+        (1718940401139714::bigint, 'Bournemouth', 5)),
+      dl as (
+        select s.site, s.ord, (l.time_of_sale at time zone 'Europe/London')::date as d,
+               btrim(regexp_replace(regexp_replace(l.name, '[*.]+$', ''), '^Scoop ', '')) as item,
+               l.quantity, l.net_with_tax
+        from sales_lines l join sites s on s.id = l.business_location_id
+        where (l.time_of_sale at time zone 'Europe/London')::date between (select d from y) - 7 and (select d from y)
+          and (l.sku in ('4714','4720','331','306','4739','4740','3764')
+               or l.name ilike any (array['%dessert%','%kulfi%','%gulab%','%jamun%','%ice cream%','%kheer%',
+                    '%brownie%','%cheesecake%','%torte%','%sundae%','%rasmalai%','%sticky toffee%']))
+          and l.name !~* 'kids' and l.sku <> '4721' and l.name !~* '^(1 scoop|item note)'
+      ),
+      py as (select site, ord, sum(quantity) as n, sum(net_with_tax) as v from dl where d = (select d from y) group by 1, 2),
+      pi as (
+        select site, string_agg(item || ' ' || q::int, ', ' order by q desc, item) as items
+        from (select site, item, sum(quantity) as q from dl where d = (select d from y) group by 1, 2 having sum(quantity) > 0) t
+        group by 1
+      ),
+      wk as (select sum(quantity) as n, sum(net_with_tax) as v from dl where d >= date_trunc('week', (select d from y))::date),
+      prev as (select coalesce(sum(quantity), 0) as n from dl where d = (select d from y) - 1),
+      top as (
+        select string_agg(item || ' ' || q::int, ', ' order by q desc, item) as items from (
+          select item, sum(quantity) as q from dl where d >= date_trunc('week', (select d from y))::date
+          group by 1 having sum(quantity) > 0 order by 2 desc, 1 limit 3) t
+      ),
+      fresh as (select count(distinct business_location_id) as n from sales_lines
+                where (time_of_sale at time zone 'Europe/London')::date = (select d from y))
+      select
+        to_char((select d from y), 'Dy DD Mon') as day_label,
+        coalesce((select sum(n) from py), 0)::int as total_qty,
+        to_char(coalesce((select sum(v) from py), 0), 'FM£999,990.00') as total_value,
+        case when coalesce((select sum(n) from py), 0) - (select n from prev) > 0
+               then ' (▲ ' || (coalesce((select sum(n) from py), 0) - (select n from prev))::int || ' on the day before)'
+             when coalesce((select sum(n) from py), 0) - (select n from prev) < 0
+               then ' (▼ ' || abs(coalesce((select sum(n) from py), 0) - (select n from prev))::int || ' on the day before)'
+             else ' (level with the day before)' end as total_chg,
+        (select string_agg(format('• *%s*: %s sold | %s%s', s.site, coalesce(py.n, 0)::int,
+                  to_char(coalesce(py.v, 0), 'FM£999,990.00'),
+                  case when pi.items is not null then ' - ' || pi.items else '' end),
+                E'\n' order by s.ord)
+         from sites s left join py on py.site = s.site left join pi on pi.site = s.site) as site_lines,
+        coalesce((select n from wk), 0)::int as wtd_qty,
+        to_char(coalesce((select v from wk), 0), 'FM£999,990.00') as wtd_value,
+        coalesce((select items from top), 'none yet') as wtd_top,
+        case when (select n from fresh) < 5
+               then E'\n_⚠ Lightspeed sales for ' || to_char((select d from y), 'DD Mon') || ' have only landed for '
+                    || (select n from fresh) || ' of 5 sites, so these numbers may be incomplete._'
+             else '' end as note
+    condition: always
+    message: |
+      *DESSERTS* - {day_label}
+
+      *Estate:* {total_qty} sold | {total_value}{total_chg}
+
+      {site_lines}
+
+      *Week to date:* {wtd_qty} sold | {wtd_value}
+      *Top sellers this week:* {wtd_top}
+      {note}
+
+
   # --- Portsmouth: per-server APC, for Alice --------------------------------
   - key: portsmouth-server-apc
     enabled: true
