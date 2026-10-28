@@ -307,6 +307,26 @@ def fetch_dashboard() -> dict:
         )
         special_rows = cur.fetchall()
 
+        # Labour (Nory) -- last 8 days per site from nory_labour_daily, keyed by
+        # site NAME. Needs `GRANT SELECT ON nory_labour_daily TO dashboard_ro`
+        # (db/grants_dashboard_labour.sql). Fails soft: if the grant has not been
+        # applied the rest of the dashboard still loads, labour just shows empty.
+        labour_rows: dict[int, list[dict]] = {}
+        try:
+            cur.execute(
+                """
+                SELECT site_name, biz_date, col, hours, planned_hours, sales
+                FROM nory_labour_daily
+                WHERE biz_date >= CURRENT_DATE - INTERVAL '8 days'
+                ORDER BY site_name, biz_date;
+                """
+            )
+            for r in cur.fetchall():
+                if r["site_name"] in NAME_TO_ID:
+                    labour_rows.setdefault(NAME_TO_ID[r["site_name"]], []).append(r)
+        except psycopg2.Error as e:
+            log.warning("labour query failed (grant missing?): %s", e)
+
         cur.close()
 
         today = date.today()
@@ -360,14 +380,17 @@ def fetch_dashboard() -> dict:
                     "reviews": _reviews_block(
                         reviews_last_night.get(bl_id), reviews_7d.get(bl_id), negative_by_site.get(bl_id, [])
                     ),
+                    "labour": _labour_block(labour_rows.get(bl_id, [])),
                 }
             )
 
+        all_labour = [r for rows in labour_rows.values() for r in rows]
         return {
             "generated_at": time.time(),
             "estate": {
                 "wtd": _period(estate_wtd, estate_wtd_prior),
                 "mtd": _period(estate_mtd, estate_mtd_prior),
+                "labour_7d": _labour_rollup(all_labour),
             },
             "sites": sites_out,
             "special": _special_block(special_rows),
@@ -443,6 +466,58 @@ def _special_block(rows: list) -> dict | None:
         "total_revenue": round(sum(s["revenue"] for s in sites_out), 2),
         "sites": sites_out,
     }
+
+
+LABOUR_TARGET_PCT = 30.0  # same target as db/views_nory.sql (red >30, amber 27-30, green <27)
+
+
+def _labour_rag(pct):
+    if pct is None:
+        return "NA"
+    return "RED" if pct > LABOUR_TARGET_PCT else "AMBER" if pct >= 27 else "GREEN"
+
+
+def _labour_rollup(rows: list) -> dict | None:
+    """Sum cost/hours/sales then divide -- never an average of daily percentages.
+    Days with no synced Nory sales (sales = 0) are left out of the % and SPLH
+    maths so a sync gap cannot inflate them."""
+    good = [r for r in rows if r["sales"] and float(r["sales"]) > 0]
+    if not good:
+        return None
+    cost = sum(float(r["col"] or 0) for r in good)
+    sales = sum(float(r["sales"]) for r in good)
+    hours = sum(float(r["hours"] or 0) for r in good)
+    pct = cost / sales * 100 if sales else None
+    return {
+        "pct": round(pct, 1) if pct is not None else None,
+        "rag": _labour_rag(pct),
+        "cost": round(cost, 2),
+        "hours": round(hours, 1),
+        "splh": round(sales / hours, 2) if hours else None,
+        "days": len(good),
+    }
+
+
+def _labour_block(rows: list) -> dict | None:
+    if not rows:
+        return None
+    last = rows[-1]
+    ln = None
+    if last["sales"] and float(last["sales"]) > 0:
+        pct = float(last["col"] or 0) / float(last["sales"]) * 100
+        hours = float(last["hours"] or 0)
+        ln = {
+            "date": last["biz_date"].isoformat(),
+            "pct": round(pct, 1),
+            "rag": _labour_rag(pct),
+            "cost": round(float(last["col"] or 0), 2),
+            "hours": round(hours, 1),
+            "planned_hours": round(float(last["planned_hours"] or 0), 1),
+            "splh": round(float(last["sales"]) / hours, 2) if hours else None,
+        }
+    else:
+        ln = {"date": last["biz_date"].isoformat(), "pct": None, "rag": "NA"}
+    return {"last_night": ln, "avg_7d": _labour_rollup(rows[-7:])}
 
 
 def _period(current: float, prior: float) -> dict:

@@ -228,6 +228,27 @@ function reviewsSection(r) {
     </div>`;
 }
 
+function ragColour(rag) {
+  return rag === 'RED' ? 'var(--bad, #e5484d)' : rag === 'AMBER' ? 'var(--warn, #f5a623)' : rag === 'GREEN' ? 'var(--good, #30a46c)' : 'var(--muted)';
+}
+
+function labourSection(l) {
+  if (!l) return '';
+  const ln = l.last_night, wk = l.avg_7d;
+  const lnHtml = ln && ln.pct != null
+    ? `<b style="color:${ragColour(ln.rag)}">${ln.pct.toFixed(1)}%</b> <span style="color:var(--muted)">(${GBP.format(ln.cost)}, ${ln.hours}h vs ${ln.planned_hours}h planned${ln.splh != null ? ', ' + GBP2.format(ln.splh) + '/hr' : ''})</span>`
+    : '<span style="color:var(--muted)">Nory sales not synced</span>';
+  const wkHtml = wk && wk.pct != null
+    ? `<b style="color:${ragColour(wk.rag)}">${wk.pct.toFixed(1)}%</b> <span style="color:var(--muted)">(${GBP.format(wk.cost)}, ${wk.hours}h${wk.splh != null ? ', ' + GBP2.format(wk.splh) + '/hr' : ''})</span>`
+    : '<span style="color:var(--muted)">&ndash;</span>';
+  return `
+    <div class="section">
+      <div class="section-label">Labour (target &le;30%)</div>
+      <div class="review-row"><span class="name">Last night</span><span>${lnHtml}</span></div>
+      <div class="review-row"><span class="name">7-day</span><span>${wkHtml}</span></div>
+    </div>`;
+}
+
 function periodSection(wtd, mtd) {
   return `
     <div class="section">
@@ -260,6 +281,7 @@ function siteCard(site) {
       ${metrics}
       <div class="spark">${sparkline(site.trend)}</div>
       ${guestSection(site.guest)}
+      ${labourSection(site.labour)}
       ${reviewsSection(site.reviews)}
       ${deliverySection(site.delivery_7d)}
       ${periodSection(site.wtd, site.mtd)}
@@ -293,6 +315,7 @@ function estateSummary(data) {
     <div class="stat"><div class="label">Estate last night</div><div class="value">${GBP.format(total)}</div></div>
     <div class="stat"><div class="label">Covers</div><div class="value">${covers}</div></div>
     <div class="stat"><div class="label">vs 7d avg</div><div class="value" style="color:${pct>=0?'#34d399':'#f87171'}">${pct>=0?'+':''}${pct.toFixed(0)}%</div></div>
+    ${data.estate.labour_7d && data.estate.labour_7d.pct != null ? `<div class="stat"><div class="label">Labour 7d</div><div class="value" style="color:${ragColour(data.estate.labour_7d.rag)}">${data.estate.labour_7d.pct.toFixed(1)}%</div><div class="sub">${GBP2.format(data.estate.labour_7d.splh || 0)}/hr</div></div>` : ''}
     <div class="stat"><div class="label">Week to date</div><div class="value">${GBP.format(wtd.total)}</div><div class="sub">${pctDelta(wtd.pct_vs_prior)} vs last wk</div></div>
     <div class="stat"><div class="label">Month to date</div><div class="value">${GBP.format(mtd.total)}</div><div class="sub">${pctDelta(mtd.pct_vs_prior)} vs last mth</div></div>
   `;
