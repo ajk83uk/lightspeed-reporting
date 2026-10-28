@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>T&amp;T Pulse</title>
-<meta name="theme-color" content="#0f172a" />
+<meta name="theme-color" content="#0b1120" />
 <link rel="manifest" href="/manifest.json" />
 <link rel="apple-touch-icon" href="/static/icon-192.png" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -96,7 +96,8 @@
 
   /* reviews section */
   .review-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; margin-top: 4px; }
-  .review-row .name { color: var(--muted); }
+  .review-row .name { color: var(--muted); white-space: nowrap; margin-right: 12px; }
+  .review-row > span:last-child { text-align: right; }
   .stars { color: var(--accent); font-weight: 700; }
   .neg-alert { margin-top: 10px; background: rgba(248,113,113,0.08); border: 1px solid rgba(248,113,113,0.35);
     border-radius: 10px; padding: 8px 10px; }
@@ -109,15 +110,73 @@
     padding: 16px; margin-bottom: 12px; }
   .special-card .card-top h2 { font-size: 15px; }
   .special-card .card-top .date { color: var(--accent); font-weight: 600; }
+
+  /* ===== v5 bold redesign: hero + story + headline tiles ===== */
+  :root { --good:#34d399; --warn:#fbbf24; --bad:#f87171; --mood:#34d399; }
+  body { background: radial-gradient(1200px 500px at 50% -120px, rgba(217,119,6,0.16), transparent 60%), var(--bg); }
+  .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; letter-spacing: -0.02em; }
+  header { padding: 22px 0 6px; }
+  header h1 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.22em; color: var(--accent); font-weight: 800; }
+  header p { font-size: 13px; }
+
+  .hero { position: relative; margin: 10px 0 14px; padding: 22px 20px 20px; border-radius: 24px; overflow: hidden;
+    background: linear-gradient(160deg, color-mix(in srgb, var(--mood) 20%, #0f172a) 0%, #0f172a 62%);
+    border: 1px solid color-mix(in srgb, var(--mood) 45%, #1f2b47); }
+  .hero::after { content:""; position:absolute; right:-70px; top:-70px; width:220px; height:220px; border-radius:50%;
+    background: radial-gradient(circle, color-mix(in srgb, var(--mood) 35%, transparent), transparent 70%); pointer-events:none; }
+  .hero .kicker { font-size: 12px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--muted); font-weight: 700; }
+  .hero .big { font-size: clamp(56px, 19vw, 92px); line-height: 0.95; font-weight: 900; margin: 10px 0 6px; }
+  .hero .verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 17px; font-weight: 800; color: var(--mood); }
+  .hero .verdict .pill { background: color-mix(in srgb, var(--mood) 18%, transparent); border: 1px solid color-mix(in srgb, var(--mood) 50%, transparent);
+    border-radius: 999px; padding: 3px 11px; white-space: nowrap; }
+  .hero .verdict span.rest { color: var(--muted); font-weight: 600; font-size: 14px; }
+
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 14px; }
+  .tile { border-radius: 18px; padding: 14px 14px 12px; background: var(--card); border: 1px solid var(--card-border);
+    position: relative; overflow: hidden; }
+  .tile::before { content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background: var(--tone, var(--card-border)); }
+  .tile .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; }
+  .tile .value { font-size: 38px; line-height: 1.02; font-weight: 900; margin-top: 6px; color: var(--tone, var(--text)); }
+  .tile .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .tile.good { --tone: var(--good); } .tile.warn { --tone: var(--warn); } .tile.bad { --tone: var(--bad); }
+
+  .story { background: var(--card); border: 1px solid var(--card-border); border-radius: 20px; padding: 16px 16px 6px; margin: 0 0 14px; }
+  .story h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--accent); font-weight: 800; }
+  .story .beat { display: flex; gap: 12px; padding: 11px 0; border-top: 1px solid var(--card-border); font-size: 15px; line-height: 1.38; }
+  .story .beat:first-of-type { border-top: none; }
+  .story .beat .dot { flex: 0 0 10px; height: 10px; margin-top: 6px; border-radius: 50%; background: var(--muted); }
+  .story .beat.good .dot { background: var(--good); } .story .beat.warn .dot { background: var(--warn); } .story .beat.bad .dot { background: var(--bad); }
+  .story .beat b { font-weight: 800; }
+
+  .estate { margin: 0 0 18px; }
+  .estate .stat .value { font-size: 22px; font-weight: 900; }
+
+  .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--muted); font-weight: 800; margin: 6px 2px 10px; }
+
+  .card { position: relative; padding: 18px 16px 16px 20px; border-radius: 22px; overflow: hidden; }
+  .card::before { content:""; position:absolute; left:0; top:0; bottom:0; width:6px; background: var(--tone, var(--card-border)); }
+  .card.good { --tone: var(--good); } .card.warn { --tone: var(--warn); } .card.bad { --tone: var(--bad); }
+  .card-top h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.14em; font-weight: 800; }
+  .card .rank { color: var(--muted); font-size: 12px; font-weight: 700; margin-right: 8px; }
+  .card .bigrev { font-size: 50px; line-height: 1; font-weight: 900; margin-top: 10px; }
+  .card .bigrev-sub { margin-top: 6px; font-size: 13px; color: var(--muted); }
+  .card .headline { margin-top: 10px; font-size: 14.5px; font-weight: 700; line-height: 1.35; color: var(--tone, var(--text)); }
+  .metrics { margin-top: 14px; }
+  .metric .value { font-size: 22px; font-weight: 800; }
+  .delta.up { color: var(--good); } .delta.down { color: var(--bad); }
 </style>
 </head>
 <body>
   <header>
-    <h1>Tap &amp; Tandoor Pulse</h1>
+    <h1>Tap &amp; Tandoor &middot; Pulse</h1>
     <p id="asof">Loading last night's numbers&hellip;</p>
   </header>
 
+  <div id="hero"></div>
+  <div class="tiles" id="tiles"></div>
+  <div id="story"></div>
   <div class="estate" id="estate"></div>
+  <div class="section-title">The five sites &middot; best night first</div>
   <div id="specialWrap"></div>
   <div class="cards" id="cards"></div>
   <footer>
@@ -258,24 +317,18 @@ function periodSection(wtd, mtd) {
     </div>`;
 }
 
-function siteCard(site) {
+function siteCard(site, i) {
   const ln = site.last_night;
-  let deltaHtml = '';
-  if (ln && site.avg_7d) {
-    const pct = ((ln.revenue - site.avg_7d) / site.avg_7d) * 100;
-    deltaHtml = `${pctDelta(pct)} <span style="color:var(--muted);font-size:11px">vs 7d avg</span>`;
-  }
+  const level = siteLevel(site);
   const metrics = ln ? `
-    <div class="metrics">
-      <div class="metric"><div class="label">Revenue</div><div class="value">${GBP.format(ln.revenue)}</div><div class="delta">${deltaHtml}</div></div>
-      <div class="metric"><div class="label">Covers</div><div class="value">${ln.covers}</div></div>
-      <div class="metric"><div class="label">Spend/head</div><div class="value">${ln.apc != null ? GBP2.format(ln.apc) : '&ndash;'}</div></div>
-    </div>` : '<div class="empty">No trading data yet</div>';
+    <div class="bigrev num">${GBP.format(ln.revenue)}</div>
+    <div class="bigrev-sub">${ln.covers} covers &middot; ${ln.apc != null ? GBP2.format(ln.apc) : '&ndash;'} a head</div>
+    <div class="headline">${siteHeadline(site)}</div>` : '<div class="empty">No trading data yet</div>';
 
   return `
-    <div class="card" onclick="openSheet(${site.id}, '${site.name}')">
+    <div class="card ${level}" onclick="openSheet(${site.id}, '${site.name}')">
       <div class="card-top">
-        <h2>${site.name}</h2>
+        <h2><span class="rank">#${i + 1}</span>${site.name}</h2>
         <span class="date">${ln ? new Date(ln.date).toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short'}) : ''}</span>
       </div>
       ${metrics}
@@ -305,20 +358,127 @@ function specialCard(special) {
     </div>`;
 }
 
+function siteDelta(s) {
+  const ln = s.last_night;
+  return (ln && s.avg_7d) ? ((ln.revenue - s.avg_7d) / s.avg_7d) * 100 : null;
+}
+
+// Status colour for a site card. Labour % is judged alongside trading so a site
+// that is down on usual AND over target reads red, not every site that is merely
+// over the 30% target.
+function siteLevel(s) {
+  const d = siteDelta(s);
+  const lab = s.labour && s.labour.last_night;
+  const neg = (s.reviews && s.reviews.negative_recent || []).length;
+  const labRed = lab && lab.rag === 'RED';
+  if (neg >= 2 || (labRed && d != null && d < 0)) return 'bad';
+  if (d != null && d >= 0 && !labRed) return 'good';
+  return 'warn';
+}
+
+function siteHeadline(s) {
+  const d = siteDelta(s);
+  const lab = s.labour && s.labour.last_night;
+  const neg = (s.reviews && s.reviews.negative_recent || []).length;
+  const bits = [];
+  if (d != null) bits.push(d >= 0 ? `${d.toFixed(0)}% ahead of usual` : `${Math.abs(d).toFixed(0)}% below usual`);
+  if (lab && lab.pct != null) bits.push(lab.rag === 'GREEN' ? 'labour on target' : `labour ${lab.pct.toFixed(0)}% vs 30% target`);
+  if (neg) bits.push(`${neg} negative review${neg > 1 ? 's' : ''}`);
+  return bits.join(' · ');
+}
+
+function buildStory(data) {
+  const sites = data.sites.filter(s => s.last_night);
+  const beats = [];
+  if (!sites.length) return beats;
+  const byRev = [...sites].sort((a, b) => b.last_night.revenue - a.last_night.revenue);
+  const top = byRev[0];
+  const topD = siteDelta(top);
+  beats.push({ lvl: 'good', html: `<b>${top.name}</b> led the estate with <b>${GBP.format(top.last_night.revenue)}</b>${topD != null ? ` (${topD >= 0 ? '+' : ''}${topD.toFixed(0)}% on its usual night)` : ''}.` });
+
+  const withD = sites.map(s => ({ s, d: siteDelta(s) })).filter(x => x.d != null);
+  if (withD.length > 1) {
+    const slip = withD.reduce((a, b) => (b.d < a.d ? b : a));
+    if (slip.d < -10) beats.push({ lvl: 'warn', html: `<b>${slip.s.name}</b> was the soft spot: <b>${GBP.format(slip.s.last_night.revenue)}</b>, ${Math.abs(slip.d).toFixed(0)}% under its usual.` });
+  }
+
+  const labs = sites.map(s => ({ s, l: s.labour && s.labour.last_night })).filter(x => x.l && x.l.pct != null);
+  if (labs.length) {
+    const over = labs.filter(x => x.l.pct > 30).sort((a, b) => b.l.pct - a.l.pct);
+    if (!over.length) beats.push({ lvl: 'good', html: `<b>Labour on target</b> at every site last night.` });
+    else beats.push({ lvl: over.length >= 3 ? 'bad' : 'warn', html: `<b>Labour ran over the 30% target</b> at ${over.length} of ${labs.length} sites. Worst: <b>${over[0].s.name} at ${over[0].l.pct.toFixed(0)}%</b>.` });
+  }
+
+  const guests = sites.filter(s => s.guest && s.guest.spend_per_head != null);
+  if (guests.length) {
+    const g = guests.reduce((a, b) => (b.guest.spend_per_head > a.guest.spend_per_head ? b : a));
+    beats.push({ lvl: 'good', html: `Guests spent most at <b>${g.name}</b>: <b>${GBP2.format(g.guest.spend_per_head)}</b> a head.` });
+  }
+
+  const negs = sites.flatMap(s => (s.reviews && s.reviews.negative_recent || []).map(() => s.name));
+  if (negs.length) {
+    const uniq = [...new Set(negs)];
+    beats.push({ lvl: 'bad', html: `<b>${negs.length} negative review${negs.length > 1 ? 's' : ''}</b> in the last 3 days, at ${uniq.join(', ')}.` });
+  } else {
+    beats.push({ lvl: 'good', html: `<b>No negative reviews</b> in the last 3 days.` });
+  }
+
+  const w = data.estate.wtd;
+  if (w && w.total) beats.push({ lvl: (w.pct_vs_prior || 0) >= 0 ? 'good' : 'warn', html: `Week to date: <b>${GBP.format(w.total)}</b>${w.pct_vs_prior != null ? `, ${w.pct_vs_prior >= 0 ? 'up' : 'down'} ${Math.abs(w.pct_vs_prior).toFixed(0)}% on the same point last week` : ''}.` });
+  return beats;
+}
+
+function countUp(el, target, fmt) {
+  const t0 = performance.now(), dur = 700;
+  function step(now) {
+    const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+    el.textContent = fmt(target * e);
+    if (k < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
 function estateSummary(data) {
-  const total = data.sites.reduce((s, x) => s + (x.last_night ? x.last_night.revenue : 0), 0);
+  const sites = data.sites.filter(s => s.last_night);
+  const total = sites.reduce((s, x) => s + x.last_night.revenue, 0);
   const avgTotal = data.sites.reduce((s, x) => s + (x.avg_7d || 0), 0);
-  const covers = data.sites.reduce((s, x) => s + (x.last_night ? x.last_night.covers : 0), 0);
+  const covers = sites.reduce((s, x) => s + x.last_night.covers, 0);
   const pct = avgTotal ? ((total - avgTotal) / avgTotal) * 100 : 0;
+  const mood = pct >= 3 ? 'var(--good)' : pct <= -10 ? 'var(--bad)' : 'var(--warn)';
+  const word = pct >= 3 ? 'Strong night' : pct <= -10 ? 'Quiet night' : 'Steady night';
+  const hero = document.getElementById('hero');
+  hero.innerHTML = `
+    <div class="hero" style="--mood:${mood}">
+      <div class="kicker">Estate takings last night</div>
+      <div class="big num" id="heroNum">${GBP.format(total)}</div>
+      <div class="verdict"><span class="pill">${word} &middot; ${pct >= 0 ? '+' : ''}${pct.toFixed(0)}%</span>
+        <span class="rest">vs a usual night (${GBP.format(avgTotal)})</span></div>
+    </div>`;
+  countUp(document.getElementById('heroNum'), total, v => GBP.format(v));
+
+  const apc = covers ? total / covers : null;
+  const lab = data.estate.labour_7d;
+  let rated = 0, rsum = 0, nps = 0;
+  data.sites.forEach(s => { const w = s.reviews && s.reviews.avg_7d; if (w) { rated += w.reviews; rsum += w.rating * w.reviews; nps += (w.nps || 0) * w.reviews; } });
+  const rating = rated ? rsum / rated : null;
+  const ratingTone = rating == null ? '' : rating >= 4.5 ? 'good' : rating >= 4.0 ? 'warn' : 'bad';
+  const labTone = !lab || lab.pct == null ? '' : lab.rag === 'GREEN' ? 'good' : lab.rag === 'AMBER' ? 'warn' : 'bad';
+  document.getElementById('tiles').innerHTML = `
+    <div class="tile"><div class="label">Covers</div><div class="value num">${covers}</div><div class="sub">across ${sites.length} sites</div></div>
+    <div class="tile"><div class="label">Spend / head</div><div class="value num">${apc != null ? GBP2.format(apc) : '&ndash;'}</div><div class="sub">takings &divide; covers</div></div>
+    <div class="tile ${labTone}"><div class="label">Labour &middot; 7 days</div><div class="value num">${lab && lab.pct != null ? lab.pct.toFixed(1) + '%' : '&ndash;'}</div><div class="sub">target 30%${lab && lab.splh ? ' &middot; ' + GBP2.format(lab.splh) + '/hr' : ''}</div></div>
+    <div class="tile ${ratingTone}"><div class="label">Guest rating &middot; 7 days</div><div class="value num">${rating != null ? rating.toFixed(2) + '&#9733;' : '&ndash;'}</div><div class="sub">${rated} review${rated === 1 ? '' : 's'}${rated ? ' &middot; NPS ' + Math.round(nps / rated) : ''}</div></div>`;
+
+  const beats = buildStory(data);
+  document.getElementById('story').innerHTML = beats.length ? `
+    <div class="story"><h3>The story of the night</h3>
+      ${beats.map(b => `<div class="beat ${b.lvl}"><span class="dot"></span><div>${b.html}</div></div>`).join('')}
+    </div>` : '';
+
   const wtd = data.estate.wtd, mtd = data.estate.mtd;
   document.getElementById('estate').innerHTML = `
-    <div class="stat"><div class="label">Estate last night</div><div class="value">${GBP.format(total)}</div></div>
-    <div class="stat"><div class="label">Covers</div><div class="value">${covers}</div></div>
-    <div class="stat"><div class="label">vs 7d avg</div><div class="value" style="color:${pct>=0?'#34d399':'#f87171'}">${pct>=0?'+':''}${pct.toFixed(0)}%</div></div>
-    ${data.estate.labour_7d && data.estate.labour_7d.pct != null ? `<div class="stat"><div class="label">Labour 7d</div><div class="value" style="color:${ragColour(data.estate.labour_7d.rag)}">${data.estate.labour_7d.pct.toFixed(1)}%</div><div class="sub">${GBP2.format(data.estate.labour_7d.splh || 0)}/hr</div></div>` : ''}
-    <div class="stat"><div class="label">Week to date</div><div class="value">${GBP.format(wtd.total)}</div><div class="sub">${pctDelta(wtd.pct_vs_prior)} vs last wk</div></div>
-    <div class="stat"><div class="label">Month to date</div><div class="value">${GBP.format(mtd.total)}</div><div class="sub">${pctDelta(mtd.pct_vs_prior)} vs last mth</div></div>
-  `;
+    <div class="stat"><div class="label">Week to date</div><div class="value num">${GBP.format(wtd.total)}</div><div class="sub">${pctDelta(wtd.pct_vs_prior)} vs last wk</div></div>
+    <div class="stat"><div class="label">Month to date</div><div class="value num">${GBP.format(mtd.total)}</div><div class="sub">${pctDelta(mtd.pct_vs_prior)} vs last mth</div></div>`;
 }
 
 async function load(force) {
@@ -336,7 +496,7 @@ async function load(force) {
 function render(data) {
   estateSummary(data);
   document.getElementById('specialWrap').innerHTML = specialCard(data.special);
-  document.getElementById('cards').innerHTML = data.sites.map(siteCard).join('');
+  document.getElementById('cards').innerHTML = [...data.sites].sort((a, b) => ((b.last_night && b.last_night.revenue) || 0) - ((a.last_night && a.last_night.revenue) || 0)).map(siteCard).join('');
   const latest = data.sites.map(s => s.last_night && s.last_night.date).filter(Boolean).sort().pop();
   document.getElementById('asof').textContent = latest ? `Last night's trading: ${new Date(latest).toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'})}` : 'No data yet';
   document.getElementById('updated').textContent = 'Updated ' + new Date(data.generated_at * 1000).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
