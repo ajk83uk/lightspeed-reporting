@@ -1159,21 +1159,48 @@ rules:
         WHERE n.loaded_at > now() - interval '6 hours'
         LIMIT 1
       ),
-      p AS (
+      p0 AS (
         -- braces would break the template renderer, asterisks/underscores
         -- would format text in ZenZap
         SELECT n.site, n.record_type,
                initcap(trim(regexp_replace(n.employee_name, '[{}*_]', '', 'g'))) AS nm,
                trim(regexp_replace(coalesce(n.role, ''), '[{}*_]', '', 'g'))     AS rl,
-               n.sched_start, n.sched_end, n.actual_in, n.actual_out
+               n.sched_start, n.sched_end, n.actual_in, n.actual_out,
+               -- hours vs rota, in minutes (+ = over rota, - = under rota).
+               -- Only complete worked shifts count; each punch inside a
+               -- 10-minute grace window is treated as on time. Missing
+               -- punches are excluded (no real hours) and shown as pending.
+               CASE WHEN n.record_type = 'variance'
+                         AND n.start_variance_min IS NOT NULL
+                         AND n.end_variance_min IS NOT NULL
+                    THEN (CASE WHEN abs(n.end_variance_min) > 10 THEN n.end_variance_min ELSE 0 END)
+                       - (CASE WHEN abs(n.start_variance_min) > 10 THEN n.start_variance_min ELSE 0 END)
+               END AS net_min
         FROM nory_shift_variance n
         JOIN d ON n.shift_date = d.y
         WHERE n.site <> 'Vita'
+      ),
+      p AS (
+        SELECT p0.*,
+               CASE WHEN net_min <> 0 THEN
+                 (abs(net_min) / 60)::int || 'h ' || lpad((abs(net_min) % 60)::text, 2, '0') || 'm '
+                 || CASE WHEN net_min > 0 THEN 'over' ELSE 'under' END
+               END AS net_txt
+        FROM p0
       ),
       agg AS (
         SELECT site,
                count(*) FILTER (WHERE record_type = 'variance')      AS worked,
                count(*) FILTER (WHERE record_type = 'missing_punch') AS flagged,
+               coalesce(sum(net_min), 0)                              AS net_total,
+               coalesce(sum(net_min) FILTER (WHERE net_min > 0), 0)   AS over_total,
+               coalesce(-sum(net_min) FILTER (WHERE net_min < 0), 0)  AS under_total,
+               string_agg(
+                 '• *' || nm || '*'
+                 || CASE WHEN rl <> '' THEN ' (' || rl || ')' ELSE '' END
+                 || ': ' || net_txt || ' rota',
+                 E'\n' ORDER BY net_min, nm
+               ) FILTER (WHERE net_min <> 0) AS hour_lines,
                string_agg(
                  '• *' || nm || '*'
                  || CASE WHEN rl <> '' THEN ' (' || rl || ')' ELSE '' END
@@ -1197,6 +1224,28 @@ rules:
                ) FILTER (WHERE record_type = 'missing_punch') AS lines
         FROM p
         GROUP BY site
+      ),
+      hrs AS (
+        SELECT a.*,
+               CASE WHEN a.worked > 0 THEN
+                 '*Hours vs rota* (punches within 10 minutes of rota count as on time)'
+                 || E'\n' ||
+                 CASE WHEN a.net_total = 0 AND a.over_total = 0 AND a.under_total = 0
+                      THEN 'The team worked right on rota.'
+                      ELSE 'Team net: ' || (abs(a.net_total) / 60)::int || 'h '
+                           || lpad((abs(a.net_total) % 60)::text, 2, '0') || 'm '
+                           || CASE WHEN a.net_total > 0 THEN 'over rota'
+                                   WHEN a.net_total < 0 THEN 'under rota'
+                                   ELSE '(over and under balanced out)' END
+                           || ' (over ' || (a.over_total / 60)::int || 'h ' || lpad((a.over_total % 60)::text, 2, '0') || 'm'
+                           || ', under ' || (a.under_total / 60)::int || 'h ' || lpad((a.under_total % 60)::text, 2, '0') || 'm)'
+                 END
+                 || coalesce(E'\n' || a.hour_lines, '')
+                 || CASE WHEN a.flagged > 0
+                         THEN E'\n' || a.flagged || ' shift(s) not counted until the clock times above are confirmed.'
+                         ELSE '' END
+               END AS hours_block
+        FROM agg a
       )
       SELECT a.site AS site_name,
              (SELECT y::text FROM d) AS shift_date,
@@ -1204,8 +1253,9 @@ rules:
                   THEN 'Please reply in this chat with the answers below so the timesheets can be corrected:'
                        || E'\n\n' || a.lines
                   ELSE 'All your team clocked in and out yesterday, well done.'
-             END AS body
-      FROM agg a
+             END
+             || coalesce(E'\n\n' || a.hours_block, '') AS body
+      FROM hrs a
       JOIN fresh ON true
       WHERE a.flagged > 0 OR a.worked > 0
       ORDER BY a.site
