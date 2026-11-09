@@ -196,9 +196,7 @@ reminders:
     enabled: true                  # approved by Ajay 9 Nov 2026
     title: Order Gulab Jamun from Royal Sweets
     schedule: "0 15 * * 0"         # Sundays 15:00 UK time - day before the Monday 1pm cut-off
-    sites: [tt-solihull, tt-southampton, tt-portsmouth,
-            tt-bournemouth, tt-peterborough]
-    route: site                    # each site's own chat
+    route: group:announcements     # posts ONCE, to Group Announcements (reaches every site)
     message: |
       *Order Gulab Jamun from Royal Sweets*
 
