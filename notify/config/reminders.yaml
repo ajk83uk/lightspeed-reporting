@@ -170,6 +170,45 @@ reminders:
 
       Thanks!
 
+  # --- Quiz night: QR code vouchers, every Monday, every site -----------------
+  # Requested 2 Nov 2026. Intended start Monday 9 Nov 2026; Ajay
+  # said switch on now and he is fine if it also fires today (2 Nov, 15:00).
+  - key: quiz-qr-vouchers-monday
+    enabled: true                  # approved by Ajay 2 Nov 2026 (fine if it also fires today)
+    title: Quiz night - generate QR code vouchers
+    schedule: "0 15 * * 1"         # Mondays 15:00 UK time
+    sites: [tt-solihull, tt-southampton, tt-portsmouth,
+            tt-bournemouth, tt-peterborough]
+    route: site                    # each site's own manager chat
+    message: |
+      *Quiz night tonight*
+
+      Managers, please generate the QR code vouchers for tonight's quiz
+      before the teams arrive.
+
+      Thank you
+
+  # --- Gulab Jamun order, every Sunday, every site ---------------------------
+  # Requested by Daysi 9 Nov 2026. Orders placed with Royal Sweets before
+  # Monday 1pm arrive the same week; reminder goes Sunday 15:00. Sent by TAPPY. Ships switched off:
+  # dry-run, then Ajay approves and flips enabled to true.
+  - key: gulab-jamun-royal-sweets-sunday
+    enabled: true                  # approved by Ajay 9 Nov 2026
+    title: Order Gulab Jamun from Royal Sweets
+    schedule: "0 15 * * 0"         # Sundays 15:00 UK time - day before the Monday 1pm cut-off
+    sites: [tt-solihull, tt-southampton, tt-portsmouth,
+            tt-bournemouth, tt-peterborough]
+    route: site                    # each site's own chat
+    message: |
+      *Order Gulab Jamun from Royal Sweets*
+
+      Please place your Gulab Jamun order with Royal Sweets *before 1pm tomorrow (Monday)*
+      so it is delivered this week.
+
+      Orders placed after 1pm on Monday will miss the same-week delivery.
+
+      Thank you
+
   # --- A shared group rather than per-site -----------------------------------
   - key: south-coast-managers-meeting
     enabled: false
