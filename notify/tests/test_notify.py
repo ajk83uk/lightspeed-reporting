@@ -490,7 +490,7 @@ APPROVED_SENDERS = {
     "sunday-preorders-saturday",      # Sat 14:00, all sites (added before 30 Sep 2026)
     "bookings-briefing",              # daily 10:00, all sites (enabled 3 Oct 2026)
     "evening-ambience-check",         # daily 19:00, group announcements (requested 7 Oct 2026)
-    "christmas-bookings",             # daily 11:00 Oct-Dec, head office (requested 9 Oct 2026)
+    "christmas-bookings",             # daily 09:00 Oct-Dec, head office (requested 9 Oct 2026, moved to 09:00 on 9 Nov 2026)
 }
 
 

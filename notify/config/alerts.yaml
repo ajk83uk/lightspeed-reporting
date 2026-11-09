@@ -393,7 +393,7 @@ rules:
   - key: christmas-bookings
     enabled: true                  # live from 9 Oct 2026 (Ajay: first send 11:00 today)
     title: Christmas bookings (December), day on day
-    schedule: "0 12 * 10-12 *"     # 12:00 daily, Oct-Dec only
+    schedule: "0 9 * 10-12 *"      # 09:00 daily UK, Oct-Dec only (moved from 12:00, 9 Nov 2026)
     route: group:head_office
     description: >
       Counts every booking with a dine date of 1-31 December that is not
