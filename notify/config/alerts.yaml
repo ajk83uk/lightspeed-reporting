@@ -1271,7 +1271,7 @@ rules:
   # Requested 18 Nov 2026. Share of yesterday's dine-in checks that carried a
   # Como member scan, per site. SHIPS DISABLED: dry-run, approve, then flip enabled.
   - key: como-scan-rate-daily
-    enabled: false                 # dry-run first; Ajay approves, then flip
+    enabled: true                  # live from 19 Nov 2026 (Ajay approved 18 Nov, 10:05 daily)
     title: Como scan rate - share of checks with a member scan, by site
     schedule: "5 10 * * *"         # 10:05 daily, previous UK calendar day
     route: group:announcements   # posts ONCE, to Group Announcements (every site sees all five)
