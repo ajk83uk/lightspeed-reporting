@@ -1265,3 +1265,64 @@ rules:
       *Attendance — {site_display}, {shift_date:date}*
 
       {body}
+
+
+  # --- Como scan rate, daily, Group Announcements ---------------------------
+  # Requested 18 Nov 2026. Share of yesterday's dine-in checks that carried a
+  # Como member scan, per site. SHIPS DISABLED: dry-run, approve, then flip enabled.
+  - key: como-scan-rate-daily
+    enabled: false                 # dry-run first; Ajay approves, then flip
+    title: Como scan rate - share of checks with a member scan, by site
+    schedule: "5 10 * * *"         # 10:05 daily, previous UK calendar day
+    route: group:announcements   # posts ONCE, to Group Announcements (every site sees all five)
+    description: >
+      Scans = Como member transactions yesterday (UK day, not cancelled), by site;
+      tables = Lightspeed dine-in checks closed yesterday. Scans on Como's
+      old Solihull/Southampton branch ids (…239426, …239431) are not credited to a site:
+      Como's own Solihull view shows no member that day. They show as 'Not matched to a site'.
+      Checked against the Como hub for 17 Nov 2026 (2 member visits).
+      One member per table at most, so it is tables scanned over tables served.
+      Private-function split bills add checks and lower the rate.
+      Zero rows from Como for a whole day usually means the feed, not the floor.
+    sql: |
+      with y as (select ((now() at time zone 'Europe/London')::date - 1) as d),
+      sites(bl, site, ord) as (values
+        (1718940401139720,'Solihull',1),(1718940401139719,'Peterborough',2),
+        (1718940401139718,'Portsmouth',3),(1718940401139717,'Southampton',4),
+        (1718940401139714,'Bournemouth',5)),
+      ls as (select s.business_location_id bl, count(*) checks from sales s
+             where s.cancelled is not true and s.dine_in is true
+               and s.time_closed >= (select d from y)::timestamp at time zone 'Europe/London'
+               and s.time_closed <  ((select d from y) + 1)::timestamp at time zone 'Europe/London'
+             group by 1),
+      cm as (select branch_id::bigint bl,
+                    count(distinct transaction_id) linked
+             from como_transactions
+             where coalesce(is_cancellation,false)=false and coalesce(cancelled,false)=false
+               and purchased_at >= (select d from y)::timestamp at time zone 'Europe/London'
+               and purchased_at <  ((select d from y) + 1)::timestamp at time zone 'Europe/London'
+             group by 1),
+      day_ as (select st.bl, coalesce(ls.checks,0) checks, coalesce(cm.linked,0) linked
+               from sites st left join ls using (bl) left join cm using (bl)),
+      ev as (select max(received_at) as last_at from como_events)
+      select to_char((select d from y),'Dy DD Mon') as day_label,
+        coalesce((select sum(linked) from cm),0)::int as tot_linked,
+        coalesce((select sum(checks) from day_),0)::int as tot_checks,
+        (select string_agg(st.site||' '||coalesce(dd.linked,0)||' of '||coalesce(dd.checks,0), E'\n' order by st.ord)
+         from sites st left join day_ dd using (bl))
+        || case when coalesce((select sum(linked) from cm where bl not in (select bl from sites)),0) > 0
+                then E'\nNot matched to a site: ' || (select sum(linked) from cm where bl not in (select bl from sites))
+                else '' end as lines,
+        case when (select last_at from ev) < now() - interval '24 hours'
+             then E'\n_No Como data in the last 24h, head office is checking._'
+             else '' end as note
+    condition: always
+    message: |
+      *APP SCANS - {day_label}*
+
+      {tot_linked} of {tot_checks} tables were scanned onto the app yesterday.
+
+      {lines}
+
+      Ask every table: "Are you a member of our app?" If they are, scan their QR on your iPhone.
+      {note}
