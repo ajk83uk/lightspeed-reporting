@@ -1273,7 +1273,7 @@ rules:
   - key: como-scan-rate-daily
     enabled: true                  # live from 19 Nov 2026 (Ajay approved 18 Nov, 10:05 daily)
     title: Como scan rate - share of checks with a member scan, by site
-    schedule: "5 10 * * *"         # 10:05 daily, previous UK calendar day
+    schedule: "0 10 * * *"         # 10:00 slot daily (service wakes at :00/:15/:30/:45 only), previous UK calendar day
     route: group:announcements   # posts ONCE, to Group Announcements (every site sees all five)
     description: >
       Scans = Como member transactions yesterday (UK day, not cancelled), by site;
