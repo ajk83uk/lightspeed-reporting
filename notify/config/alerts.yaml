@@ -735,7 +735,7 @@ rules:
 
   # --- FT vs LS covers reconciliation, per site -----------------------------
   - key: ft-vs-ls-covers
-    enabled: true
+    enabled: false                 # switched off 22 Nov 2026 (Ajay: stop from tomorrow)
     title: FT vs LS covers
     schedule: "0 11 * * *"         # daily 11:00, with the brief
     route: site
