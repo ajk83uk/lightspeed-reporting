@@ -119,7 +119,7 @@ reminders:
   # Requested 30 Sep 2026. Southampton were missing bookers' orders.
   # Wording is Ajay's own — do not paraphrase it.
   - key: southampton-bookers-order
-    enabled: true
+    enabled: false                 # retired by Ajay 24 Nov 2026
     title: Place the bookers' order
     schedule: "0 13 * * 0,3"       # Sundays and Wednesdays, 13:00
     sites: [tt-southampton]

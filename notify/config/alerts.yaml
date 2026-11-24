@@ -23,7 +23,7 @@ rules:
 
   # -------------------------------------------------------------------------
   - key: daily-site-brief
-    enabled: true
+    enabled: false                 # retired by Ajay 24 Nov 2026
     title: Morning brief — last night, then today
     schedule: "0 11 * * *"      # 11:00 daily, all sites
     description: >
@@ -144,7 +144,7 @@ rules:
 
   # --- Weekly sports bookings, head office only -----------------------------
   - key: weekly-sports-bookings
-    enabled: true
+    enabled: false                 # retired by Ajay 24 Nov 2026
     title: Weekly sports bookings
     schedule: "0 10 * * 1"         # Mondays 10:00 — prior full week, Mon-Sun
     route: group:head_office       # NOT site staff: see description
