@@ -11,7 +11,9 @@ SELECT business_location_id,
        COUNT(*)                 AS payments,
        -- IKGIFT: positive = voucher redeemed against a bill, negative = voucher sold
        SUM(CASE WHEN code = 'IKGIFT' AND net_with_tax > 0 THEN net_with_tax ELSE 0 END)  AS gift_redeemed,
-       SUM(CASE WHEN code = 'IKGIFT' AND net_with_tax < 0 THEN -net_with_tax ELSE 0 END) AS gift_sold
+       SUM(CASE WHEN code = 'IKGIFT' AND net_with_tax < 0 THEN -net_with_tax ELSE 0 END) AS gift_sold,
+       -- STR = Storekit / Order Anywhere online orders, with any tip on them (matches the Solihull and Peterborough forms)
+       SUM(CASE WHEN code = 'STR' THEN net_with_tax + COALESCE(tip, 0) ELSE 0 END)        AS online_orders
 FROM v_fact_payments
 GROUP BY business_location_id, business_date, tender_group;
 
