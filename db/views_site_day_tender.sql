@@ -23,3 +23,23 @@ BEGIN
         GRANT SELECT ON v_site_day_tender TO dashboard_ro;
     END IF;
 END $$;
+
+-- 15-minute totals per site and day (London time), for the tapapp owner's live sales graph. Aggregates only.
+CREATE OR REPLACE VIEW v_site_day_slots AS
+SELECT business_location_id,
+       business_date,
+       (EXTRACT(HOUR FROM time_closed AT TIME ZONE 'Europe/London') * 60
+        + FLOOR(EXTRACT(MINUTE FROM time_closed AT TIME ZONE 'Europe/London') / 15) * 15)::int AS slot_min,
+       SUM(net_with_tax)       AS net_with_tax,
+       SUM(COALESCE(tip, 0))   AS tip,
+       COUNT(*)                AS payments
+FROM v_fact_payments
+WHERE time_closed IS NOT NULL
+GROUP BY business_location_id, business_date, 3;
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dashboard_ro') THEN
+        GRANT SELECT ON v_site_day_slots TO dashboard_ro;
+    END IF;
+END $$;
