@@ -8,7 +8,10 @@ SELECT business_location_id,
        SUM(net_with_tax)        AS net_with_tax,
        SUM(COALESCE(tip, 0))    AS tip,
        MAX(time_closed)         AS latest_closed,
-       COUNT(*)                 AS payments
+       COUNT(*)                 AS payments,
+       -- IKGIFT: positive = voucher redeemed against a bill, negative = voucher sold
+       SUM(CASE WHEN code = 'IKGIFT' AND net_with_tax > 0 THEN net_with_tax ELSE 0 END)  AS gift_redeemed,
+       SUM(CASE WHEN code = 'IKGIFT' AND net_with_tax < 0 THEN -net_with_tax ELSE 0 END) AS gift_sold
 FROM v_fact_payments
 GROUP BY business_location_id, business_date, tender_group;
 
