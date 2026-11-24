@@ -1,0 +1,14 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "_why": "Evening sales-only pull so the tapapp cash-off 'Pull sales data now' button sees tonight's takings within minutes of close. Railway cron is UTC: 15:00-23:59 and 00:00-01:59 UTC covers trading and close in both BST and GMT. Re-pulls the last day and upserts, so overlap with the 05:30 nightly job is harmless. Does NOT touch items, labour, bookings or the other nightly steps.",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile"
+  },
+  "deploy": {
+    "startCommand": "python -m ingest.run sales --days 1",
+    "cronSchedule": "*/15 15-23,0-1 * * *",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 1
+  }
+}
