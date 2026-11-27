@@ -941,7 +941,7 @@ rules:
 
   # -------------------------------------------------------------------------
   - key: bookings-briefing
-    enabled: true               # refresh service: railway.bookings-refresh.json
+    enabled: false                # retired by Ajay 27 Nov 2026
     title: Today's bookings to note — large parties, deposits, guest notes
     schedule: "0 10 * * *"      # 10:00 UK daily, each site's own chat
     description: >
