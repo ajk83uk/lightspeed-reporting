@@ -6,3 +6,6 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+
+# guest feedback dry-run email previews
+feedback/previews/

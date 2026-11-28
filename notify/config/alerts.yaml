@@ -1326,3 +1326,64 @@ rules:
 
       Ask every table: "Are you a member of our app?" If they are, scan their QR on your iPhone.
       {note}
+
+
+  # --- Guest feedback: low scores and health flags, Head Office only ---------
+  # Requested 27 Nov 2026. Reads the alert queue written by the guest feedback
+  # service (feedback/). SHIPS DISABLED: dry-run, approve, then flip enabled.
+  #
+  # One digest a day rather than a message per response: notify posts once per
+  # rule per day to a group. Window is the last 24 hours, so each alert lands in
+  # exactly one digest as long as the rule runs daily. Only sends if there is
+  # something to say (the condition below).
+  #
+  # Head Office ONLY, never the site chats. Allergy / illness / hygiene flags
+  # go first and name Ally and Oppy, per the standing rule. No guest email
+  # addresses in the text: the summary carries first name, site, date and the
+  # booking reference, which is enough to look the guest up.
+  - key: guest-feedback-daily
+    enabled: false
+    title: Guest feedback needing attention
+    schedule: "30 9 * * *"         # 09:30 daily
+    route: group:head_office
+    description: >
+      Any survey response with a rating of 3 stars or below, or an allergy,
+      illness or hygiene flag, in the last 24 hours. Source: v_feedback_alerts_pending.
+    sql: |
+      with p as (
+        select kind, created_at,
+               left(translate(summary, '{}', '()'), 500) as summary,
+               row_number() over (partition by kind order by created_at) as rn,
+               count(*)     over (partition by kind) as kind_total
+        from v_feedback_alerts_pending
+        where created_at >= now() - interval '24 hours'
+      ),
+      h as (select * from p where kind = 'health'),
+      l as (select * from p where kind = 'low_score')
+      select
+        (select count(*) from p)::int                      as n,
+        (select count(*) from h)::int                      as n_health,
+        (select count(*) from l)::int                      as n_low,
+        case when exists (select 1 from h) then
+          E'*ALLERGY / ILLNESS / HYGIENE* - tell Ally or Oppy today\n'
+          || (select string_agg('• ' || summary, E'\n' order by created_at) from h where rn <= 10)
+          || case when (select max(kind_total) from h) > 10
+                  then E'\n+' || ((select max(kind_total) from h) - 10) || ' more, see the feedback tables' else '' end
+          || E'\n\n'
+        else '' end                                        as health_block,
+        case when exists (select 1 from l) then
+          E'*Low scores (3 stars or below)*\n'
+          || (select string_agg('• ' || summary, E'\n' order by created_at) from l where rn <= 10)
+          || case when (select max(kind_total) from l) > 10
+                  then E'\n+' || ((select max(kind_total) from l) - 10) || ' more, see the feedback tables' else '' end
+        else '' end                                        as low_block
+    condition:
+      all:
+        - column: n
+          op: ">"
+          value: 0
+    message: |
+      *GUEST FEEDBACK - last 24 hours*
+      {n_health} health flag(s), {n_low} low-score response(s)
+
+      {health_block}{low_block}
