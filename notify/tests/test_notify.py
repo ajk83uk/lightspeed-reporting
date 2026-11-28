@@ -1421,3 +1421,33 @@ def test_group_external_id_has_no_underscores():
     assert 're.sub(r"[^A-Za-z0-9-]", "-"' in src
     assert re.fullmatch(r"[A-Za-z0-9-]+",
                         re.sub(r"[^A-Za-z0-9-]", "-", "christmas-bookings-20261009-head_office"))
+
+
+# ------------------------------------------------------------ guest feedback digest
+def _feedback_rule():
+    return next(r for r in load_rules() if r.key == "guest-feedback-daily")
+
+
+def test_guest_feedback_digest_ships_disabled_and_is_head_office_only():
+    rule = _feedback_rule()
+    assert rule.enabled is False
+    assert rule.route == "group:head_office"
+
+
+def test_guest_feedback_digest_only_sends_when_there_is_something():
+    rule = _feedback_rule()
+    assert rule.matches({"n": 2}) is True
+    assert rule.matches({"n": 0}) is False
+    assert rule.matches({"n": None}) is False
+
+
+def test_guest_feedback_digest_renders_and_names_ally_and_oppy():
+    rule = _feedback_rule()
+    row = {
+        "n": 2, "n_health": 1, "n_low": 1,
+        "health_block": "*ALLERGY / ILLNESS / HYGIENE* - tell Ally or Oppy today\n• Solihull, Thu 26 Nov, Priya, booking 123\n\n",
+        "low_block": "*Low scores (3 stars or below)*\n• Solihull, Thu 26 Nov, Priya: food 2*",
+    }
+    text = rule.render(row, "Head Office")
+    assert "Ally or Oppy" in text and "food 2*" in text and "{" not in text
+    assert "@" not in text   # no email addresses in a group message
